@@ -4,7 +4,7 @@ Shared pytest fixtures and configuration for author-collector tests.
 
 import pytest
 from pathlib import Path
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from core.models import (
@@ -35,11 +35,11 @@ def sample_evidence() -> Evidence:
         extracted_text="Example Article: Breaking News",
         confidence=0.95,
         metadata={"tag": "og:title"},
-        retrieved_at=datetime.utcnow(),
+        retrieved_at=datetime.now(UTC),
         extractor_version="jsonld@1.0",
         input_ref="og:title",
         snippet_max_chars_applied=800,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
         run_id="run-001",
     )
 
@@ -56,8 +56,8 @@ def sample_evidence_author() -> Evidence:
         extraction_method="trafilatura",
         extracted_text="Jane Doe",
         confidence=0.8,
-        retrieved_at=datetime.utcnow(),
-        created_at=datetime.utcnow(),
+        retrieved_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
         run_id="run-001",
     )
 
@@ -79,8 +79,8 @@ def sample_article(sample_evidence: Evidence) -> Article:
         snippet="In a stunning turn of events, artificial intelligence has achieved...",
         evidence=[sample_evidence],
         version=1,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 
@@ -97,8 +97,8 @@ def sample_article_minimal() -> Article:
         snippet=None,
         evidence=[],
         version=1,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 

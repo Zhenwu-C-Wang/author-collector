@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>http://arxiv.org/api/q</id>
+  <title>arXiv Query Results</title>
+  <updated>2026-02-27T00:00:00Z</updated>
+
+  <entry>
+    <id>https://arxiv.org/abs/2602.00001</id>
+    <title>Paper One</title>
+    <updated>2026-02-27T01:00:00Z</updated>
+    <published>2026-02-26T00:00:00Z</published>
+    <author><name>Jane Doe</name></author>
+    <link href="https://arxiv.org/abs/2602.00001" rel="alternate" type="text/html" />
+    <link href="https://arxiv.org/pdf/2602.00001.pdf" rel="related" type="application/pdf" title="pdf" />
+  </entry>
+
+  <entry>
+    <id>https://arxiv.org/abs/2602.00002</id>
+    <title>Paper Two</title>
+    <updated>2026-02-27T02:00:00Z</updated>
+    <published>2026-02-26T00:00:00Z</published>
+    <author><name>Jane Doe</name></author>
+    <link href="https://arxiv.org/abs/2602.00002" rel="alternate" type="text/html" />
+    <link href="https://arxiv.org/pdf/2602.00002.pdf" rel="related" type="application/pdf" title="pdf" />
+  </entry>
+
+  <entry>
+    <id>https://arxiv.org/abs/2602.00003</id>
+    <title>Paper Three</title>
+    <updated>2026-02-27T03:00:00Z</updated>
+    <published>2026-02-26T00:00:00Z</published>
+    <author><name>Jane Doe</name></author>
+    <link href="https://arxiv.org/abs/2602.00003" rel="alternate" type="text/html" />
+    <link href="https://arxiv.org/pdf/2602.00003.pdf" rel="related" type="application/pdf" title="pdf" />
+  </entry>
+</feed>

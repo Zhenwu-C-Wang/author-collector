@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example Feed</title>
+    <link>https://example.com/</link>
+    <description>Fixture feed for connector integration testing</description>
+
+    <item>
+      <title>Example Article One</title>
+      <link>https://example.com/article-1</link>
+      <pubDate>Thu, 27 Feb 2026 10:00:00 +0000</pubDate>
+      <author>jane@example.com (Jane Doe)</author>
+    </item>
+
+    <item>
+      <title>Example Article Two</title>
+      <link>https://example.com/article-2</link>
+      <pubDate>Thu, 27 Feb 2026 11:00:00 +0000</pubDate>
+      <author>jane@example.com (Jane Doe)</author>
+    </item>
+
+    <item>
+      <title>Example Article Three</title>
+      <link>https://example.com/article-3</link>
+      <pubDate>Thu, 27 Feb 2026 12:00:00 +0000</pubDate>
+      <author>jane@example.com (Jane Doe)</author>
+    </item>
+  </channel>
+</rss>

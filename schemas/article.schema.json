@@ -42,7 +42,11 @@
         "properties": {
           "id": {"type": "string"},
           "article_id": {"type": "string"},
-          "claim_path": {"type": "string", "description": "JSON Pointer to claim (RFC 6901, e.g. '/title', '/author_hint')"},
+          "claim_path": {
+            "type": "string",
+            "pattern": "^(/([^/~]|(~[01]))*)+$",
+            "description": "JSON Pointer to claim (RFC 6901, e.g. '/title', '/author_hint')"
+          },
           "evidence_type": {"type": "string", "enum": ["meta_tag", "json_ld", "extracted", "fetched_content"]},
           "source_url": {"type": "string", "format": "uri"},
           "extraction_method": {"type": ["string", "null"]},

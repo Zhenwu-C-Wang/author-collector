@@ -34,7 +34,31 @@ parser = [
 ]
 
 [project.scripts]
-author-collector = "cli.main:cli"
+author-collector = "author_collector.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["core", "storage", "author_collector", "fetcher", "parser", "extractor", "quality", "connectors", "resolution"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "core",
+  "storage",
+  "author_collector",
+  "fetcher",
+  "parser",
+  "extractor",
+  "quality",
+  "connectors",
+  "resolution",
+  "schemas",
+  "docs",
+  "tests",
+  "README.md",
+  "ROADMAP.md",
+  "ROLLBACK.md",
+  "CHANGESET.md",
+  "LICENSE",
+]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -53,8 +77,23 @@ target-version = ["py310"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-select = ["E", "F", "W", "B"]
-ignore = ["E501"]  # line too long (handled by black)
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "D"]
+ignore = [
+  "E501",  # line too long (handled by black)
+  "D200",  # one-line docstring fit
+  "D203",  # class blank line style
+  "D204",  # class blank line style
+  "D212",  # multi-line summary position
+  "D213",  # multi-line summary position
+  "D400",  # first line punctuation style
+  "D401",  # imperative mood style
+  "D413",  # blank line after section
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D"]
 
 [tool.mypy]
 python_version = "3.10"

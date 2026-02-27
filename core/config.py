@@ -10,7 +10,7 @@ In future versions, some settings may become configurable, but only with
 explicit acknowledgment of the risks.
 """
 
-from typing import Set, Tuple
+from typing import Set
 
 
 class ComplianceConfig:

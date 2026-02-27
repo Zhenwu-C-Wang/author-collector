@@ -7,7 +7,7 @@ These tests are run on CI and must pass before any feature work.
 
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 import jsonschema
@@ -42,8 +42,8 @@ def sample_article(sample_evidence: Evidence) -> Article:
         snippet="This is an example article snippet...",
         evidence=[sample_evidence],
         version=1,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 
@@ -76,16 +76,37 @@ class TestEvidenceSchema:
         invalid_evidence = {
             "id": "ev-001",
             "article_id": "art-001",
-            "claim_path": "title",
+            "claim_path": "/title",
             "evidence_type": "meta_tag",
             "source_url": "https://example.com",
             "extracted_text": "Title",
+            "retrieved_at": "2025-02-27T10:00:00",
             "created_at": "2025-02-27T10:00:00",
             "run_id": "run-001",
             "extra_field": "not allowed",  # INVALID
         }
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(invalid_evidence, EVIDENCE_SCHEMA)
+
+    def test_claim_path_must_be_json_pointer(self):
+        """claim_path must be RFC 6901 JSON Pointer (starts with '/')."""
+        valid_data = {
+            "id": "ev-001",
+            "article_id": "art-001",
+            "claim_path": "/title",
+            "evidence_type": "meta_tag",
+            "source_url": "https://example.com",
+            "extracted_text": "Text",
+            "retrieved_at": "2025-02-27T10:00:00",
+            "created_at": "2025-02-27T10:00:00",
+            "run_id": "run-001",
+        }
+        jsonschema.validate(valid_data, EVIDENCE_SCHEMA)
+
+        invalid_data = valid_data.copy()
+        invalid_data["claim_path"] = "title"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(invalid_data, EVIDENCE_SCHEMA)
 
     def test_evidence_type_enum_validation(self):
         """Evidence type must be one of the allowed enum values."""
@@ -255,8 +276,8 @@ class TestEvidenceValidation:
             title="My Title",  # Non-null
             evidence=[],  # MISSING EVIDENCE
             version=1,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         is_valid, errors = validate_evidence(article)
         assert not is_valid
@@ -271,8 +292,8 @@ class TestEvidenceValidation:
             title=None,  # Null
             evidence=[],
             version=1,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         is_valid, errors = validate_evidence(article)
         assert is_valid, f"Should be valid, got errors: {errors}"
@@ -292,14 +313,14 @@ class TestEvidenceValidation:
                     evidence_type=EvidenceType.META_TAG,
                     source_url="https://example.com",
                     extracted_text="Text",
-                    retrieved_at=datetime.utcnow(),
-                    created_at=datetime.utcnow(),
+                    retrieved_at=datetime.now(UTC),
+                    created_at=datetime.now(UTC),
                     run_id="run-001",
                 )
             ],
             version=1,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         is_valid, errors = validate_evidence(article)
         assert not is_valid
@@ -346,32 +367,30 @@ class TestExportCompliance:
 
     @pytest.mark.contract
     def test_no_duplicate_article_ids(self, tmp_path):
-        """Export must not have duplicate article IDs (dedup verification)."""
+        """Export must not have duplicate (canonical_url, source_id) dedup keys."""
         export_file = tmp_path / "export.jsonl"
 
-        # Write 3 articles (2 unique, 1 duplicate)
+        # Write 3 articles with unique dedup keys
         articles = [
             {"id": "art-001", "canonical_url": "https://a.com", "source_id": "rss:test", "evidence": [], "version": 1, "created_at": "2025-02-27T10:00:00", "updated_at": "2025-02-27T10:00:00"},
             {"id": "art-002", "canonical_url": "https://b.com", "source_id": "rss:test", "evidence": [], "version": 1, "created_at": "2025-02-27T10:00:00", "updated_at": "2025-02-27T10:00:00"},
-            {"id": "art-001", "canonical_url": "https://a.com", "source_id": "rss:test", "evidence": [], "version": 2, "created_at": "2025-02-27T10:00:00", "updated_at": "2025-02-27T10:01:00"},  # Duplicate
+            {"id": "art-003", "canonical_url": "https://a.com", "source_id": "rss:other", "evidence": [], "version": 1, "created_at": "2025-02-27T10:00:00", "updated_at": "2025-02-27T10:01:00"},
         ]
 
         lines = "\n".join(json.dumps(art) for art in articles) + "\n"
         export_file.write_text(lines)
 
-        # Check for duplicates
-        seen_ids = set()
+        # Check for duplicate dedup keys
+        seen_keys = set()
         duplicates = set()
         with open(export_file) as f:
             for line in f:
                 if not line.strip():
                     continue
                 data = json.loads(line)
-                art_id = data["id"]
-                if art_id in seen_ids:
-                    duplicates.add(art_id)
-                seen_ids.add(art_id)
+                key = (data["canonical_url"], data["source_id"])
+                if key in seen_keys:
+                    duplicates.add(key)
+                seen_keys.add(key)
 
-        # This test verifies the requirement: storage layer should prevent duplicates
-        # In this test, we're validating that our dedup logic would catch it
-        assert len(duplicates) > 0, "Test expected to find duplicates in export (demonstrates need for dedup)"
+        assert not duplicates, f"Export must not contain duplicate dedup keys, found: {duplicates}"

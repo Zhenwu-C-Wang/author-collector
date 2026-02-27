@@ -11,6 +11,16 @@ This document describes how to **identify, prevent, and recover from incidents**
 3. **All destructive ops are audit-logged** — Before deletion/merge, record decision in database.
 4. **Recovery is reproducible** — Rollback commands are idempotent; can re-run safely.
 
+## Current CLI Capability (v0)
+
+- Implemented:
+  - `author-collector rollback --run <run_id> [--db <path>]`
+  - `author-collector export --output <file> [--db <path>]`
+  - `author-collector review-queue [--output review.json] [--db <path>]`
+  - `author-collector review apply <review.json> [--db <path>] [--run-id <id>]`
+- Not implemented yet:
+  - `list-runs`, `inspect-run`, `rollback --merge`, `rollback --dry-run`, `rollback --type ...`
+
 ---
 
 ## Incident Types & Recovery
@@ -31,33 +41,25 @@ This document describes how to **identify, prevent, and recover from incidents**
 # 1. Stop current run immediately
 # (Ctrl+C or kill process)
 
-# 2. Identify the problematic run
-$ author-collector list-runs
-# Output:
-# run_id | source_id | status   | fetched_count | started_at
-# abc123 | rss:example | FAILED | 10000 | 2025-02-27T10:05:00Z
+# 2. Identify the problematic run from DB
+$ sqlite3 collector.db "SELECT id, source_id, status, fetched_count, started_at FROM run_log ORDER BY started_at DESC LIMIT 20;"
 
-# 3. Inspect what was fetched
-$ author-collector inspect-run --run-id abc123 --show-urls | head -20
-# Shows sample of URLs fetched in that run
+# 3. Inspect what was fetched for one run
+$ sqlite3 collector.db "SELECT url, status_code, error_code, created_at FROM fetch_log WHERE run_id='abc123' ORDER BY created_at LIMIT 20;"
+# Shows sample URLs fetched in that run
 
 # 4. Check live status (optional, if site has monitoring)
 # Visit site, check robots.txt, check for IP ban symptoms
 
 # 5. Rollback the run
-$ author-collector rollback --run abc123 --verbose
+$ author-collector rollback --run abc123
 # - Deletes evidence records for run abc123
 # - Deletes version records for run abc123
 # - Reverts articles to their pre-abc123 state (or deletes if newly created in abc123)
-# - Output: "Rolled back 10000 fetch_log entries, 10000 evidence entries, 5000 versions"
+# - Output includes per-table deleted/reverted counts
 
-# 6. Optionally blocklist the source/domain
-$ author-collector config update blocklist --add-domain example.com
-# OR disable the connector:
-$ author-collector config update --disable-source rss:example
-
-# 7. Re-run with corrected config
-$ author-collector sync --source-id rss:example  # now with robots enforced, slower
+# 6. Re-run with corrected code/config
+$ author-collector sync --source-id rss:example --seed tests/fixtures/rss/example.xml
 ```
 
 **Rationale**: `run_id` tracking makes it trivial to unpick one bad run without affecting others.
@@ -79,16 +81,13 @@ $ author-collector sync --source-id rss:example  # now with robots enforced, slo
 # 1. Identify malicious request
 $ grep -i "169.254\|localhost\|10\." fetch_log.json | head -5
 
-# 2. Disable the connector that produced the malicious seed
-$ author-collector config update --disable-source <source_id>
-
-# 3. Verify no network trace occured (check server/IDS logs)
+# 2. Verify no network trace occured (check server/IDS logs)
 # (This is a deployment concern, not app concern)
 
-# 4. Rollback the run
+# 3. Rollback the run
 $ author-collector rollback --run <run_id>
 
-# 5. Fix the connector or seed URL list
+# 4. Fix the connector or seed URL list
 # (E.g., if HTML author page connector is scraping user-supplied links,
 #  add URL validation before feeding to fetch stage)
 ```
@@ -110,8 +109,8 @@ $ author-collector rollback --run <run_id>
 
 ```bash
 # 1. Identify the corrupted article
-$ author-collector export --check-schema 2>&1 | grep -A2 "INVALID"
-# Output: article_id=xyz: missing evidence[0].claim_path
+$ author-collector export --output verify.jsonl
+# If export fails, output includes article_id + schema error detail
 
 # 2. Inspect the article in DB
 $ sqlite3 collector.db "SELECT * FROM articles WHERE id='xyz'"
@@ -121,20 +120,22 @@ $ sqlite3 collector.db "SELECT * FROM evidence WHERE article_id='xyz'"
 $ sqlite3 collector.db "SELECT run_id FROM evidence WHERE article_id='xyz' LIMIT 1"
 
 # 4. Rollback that run (or broader investigation)
-$ author-collector rollback --run <run_id> --verbose
+$ author-collector rollback --run <run_id>
 # Verify article restored to valid state
 
 # 5. If corruption is widespread, restore from snapshot
 $ cp collector.db.backup collector.db
-$ author-collector export  # verify valid again
+$ author-collector export --output verify.jsonl  # verify valid again
 ```
 
-**Alternative: Data Patching** (if rollback is too costly):
+**Alternative: Manual SQL Patch** (if rollback is too costly):
 
 ```bash
-# For known minor issues (e.g., missing evidence field):
-$ author-collector admin patch-evidence --article-id xyz --regenerate-from-content
-# (Requires saved HTML/content in evidence or archive)
+# Example: inspect one damaged row and patch directly in SQLite.
+$ sqlite3 collector.db "SELECT id, version FROM articles WHERE id='xyz';"
+$ sqlite3 collector.db "UPDATE articles SET version=1 WHERE id='xyz';"
+# Then re-run export to ensure schema validity.
+$ author-collector export --output verify.jsonl
 ```
 
 ---
@@ -147,7 +148,7 @@ $ author-collector admin patch-evidence --article-id xyz --regenerate-from-conte
 - v0 design: NO auto-merge; all merges are manual review queue
 - Merges are never automatic; require explicit `review apply`
 
-**Recovery Procedure** (if human made mistake in review):
+**Recovery Procedure** (planned for M5):
 
 ```bash
 # 1. Identify the merge decision
@@ -156,18 +157,7 @@ $ sqlite3 collector.db "SELECT * FROM merge_decisions WHERE from_author_id='A' A
 # merge_id | from_author_id | to_author_id | created_at | run_id
 # merge_456 | author_A | author_B | 2025-02-27T... | review_run_123
 
-# 2. Inspect what was merged
-$ author-collector inspect-merge --merge-id merge_456
-# Shows: N articles re-attributed, evidence preserved
-
-# 3. Unmerge (rollback)
-$ author-collector rollback --merge merge_456 --verbose
-# - Restores account relationships to pre-merge state
-# - Articles revert to original author_id
-# - merge_decisions row marked as "reverted" (not deleted, for audit trail)
-# Output: "Reverted merge 456: 50 articles restored to author_A"
-
-# 4. Re-review (optional, with better criteria)
+# 2. Re-review (optional, with better criteria)
 $ author-collector review-queue --min-score 0.95  # higher threshold
 # Edit review.json with correct decisions
 $ author-collector review apply review_v2.json
@@ -192,18 +182,8 @@ $ author-collector review apply review_v2.json
 # 1. Verify dedup is broken
 $ sqlite3 collector.db "SELECT canonical_url, COUNT(*) FROM articles GROUP BY canonical_url HAVING COUNT(*) > 1 LIMIT 5"
 
-# 2. Check canonicalization logic
-$ author-collector admin test-urlnorm --url "https://example.com/page?utm_source=twitter"
-# Output: https://example.com/page (utm params stripped)
-
-# 3. If canonicalization changed, re-run
-$ author-collector admin recompute-canonical-urls --dry-run
-# Preview what would be updated
-$ author-collector admin recompute-canonical-urls --confirm
-# Merges duplicates under true canonical URL
-
-# 4. Or rollback entire session and re-run with fixed logic
-$ author-collector rollback --run <affected_run> --verbose
+# 2. If canonicalization logic changed, rollback affected run and re-sync
+$ author-collector rollback --run <affected_run>
 ```
 
 ---
@@ -272,7 +252,7 @@ Compensation Sequence (stages 4 → 1):
        b. IF updated in abc123 (prior versions exist) → REVERT to latest pre-abc123 version
        c. Update article.version to pre-abc123 value
   4. Find all FetchLog rows { run_id=abc123 } → DELETE (cleanup logs)
-  5. Verify sanity: export --check-schema (ensure no orphaned references)
+  5. Verify sanity: `author-collector export --output verify.jsonl` (ensure no schema failures)
 ```
 
 ### Examples
@@ -370,7 +350,7 @@ Final state:
 Timeline of a run_id:
 
 1. Created: run_id = UUID.uuid4() generated at sync start
-   - Stored in RunLog { id=run_id, source_id, status='IN_PROGRESS', started_at=now() }
+   - Stored in RunLog { id=run_id, source_id, status='RUNNING', started_at=now() }
 
 2. Active: During sync, all writes include run_id
    - fetch_log.run_id = run_id
@@ -387,7 +367,7 @@ Timeline of a run_id:
 5. Rollback: (optional) operator invokes `rollback --run abc123`
    - Compensation sequence executes
    - All rows { run_id=abc123 } either deleted or compensated
-   - RunLog status may be marked 'ROLLED_BACK' (informational)
+   - RunLog status is marked `CANCELLED` with rollback note
 ```
 
 This saga pattern ensures:
@@ -404,52 +384,21 @@ This saga pattern ensures:
 
 ```bash
 # Rollback entire run
-$ author-collector rollback --run abc123 --verbose
-
-# Rollback specific merge decision
-$ author-collector rollback --merge merge_456 --verbose
-
-# Dry-run (show what would be deleted)
-$ author-collector rollback --run abc123 --dry-run
-
-# Selective rollback (only evidence, keep articles)
-$ author-collector rollback --run abc123 --type evidence-only
+$ author-collector rollback --run abc123
+$ author-collector rollback --run abc123 --db collector.db
 ```
 
-### Command: `author-collector inspect-run`
+### Operational Queries (SQLite)
 
 ```bash
-# Show run summary
-$ author-collector inspect-run --run-id abc123
-# Output:
-# run_id: abc123
-# source_id: rss:example
-# status: COMPLETED
-# started_at: 2025-02-27T10:00:00Z
-# ended_at: 2025-02-27T10:15:00Z
-# fetch_count: 152
-# new_articles: 42
-# updated_articles: 5
-# evidence_count: 189
-# errors: 2 (list below)
+# List runs with summary
+$ sqlite3 collector.db "SELECT id, source_id, status, fetched_count, new_articles_count, updated_articles_count, started_at, ended_at FROM run_log ORDER BY started_at DESC LIMIT 20;"
 
-# Show URLs fetched
-$ author-collector inspect-run --run-id abc123 --show-urls | head -20
+# Inspect fetched URLs for one run
+$ sqlite3 collector.db "SELECT url, status_code, error_code, created_at FROM fetch_log WHERE run_id='abc123' ORDER BY created_at LIMIT 50;"
 
-# Show articles created/modified
-$ author-collector inspect-run --run-id abc123 --show-articles | jq '.[] | {title, canonical_url}'
-```
-
-### Command: `author-collector list-runs`
-
-```bash
-# List all runs with summary
-$ author-collector list-runs --order created_at --limit 10
-# Output:
-# run_id    | source_id      | status    | fetched | articles | created_at
-# run_789   | rss:techblog   | COMPLETED |    250  |      45  | 2025-02-27T10:30:00Z
-# run_456   | arxiv:cs       | COMPLETED |    120  |      30  | 2025-02-27T09:00:00Z
-# run_123   | rss:example    | FAILED    | 10000   |    5000  | 2025-02-27T08:30:00Z (ROLLED BACK)
+# Inspect article/evidence linkage for one run
+$ sqlite3 collector.db "SELECT e.article_id, a.canonical_url, e.claim_path, e.evidence_type FROM evidence e JOIN articles a ON a.id=e.article_id WHERE e.run_id='abc123' LIMIT 50;"
 ```
 
 ---
@@ -466,7 +415,7 @@ $ cp collector.db collector.db.pre_large_sync.2025-02-27
 $ cp collector.db.pre_large_sync.2025-02-27 collector.db
 
 # Verify restored state
-$ author-collector export --check-schema
+$ author-collector export --output verify.jsonl
 ```
 
 **Recommendation**: Automated daily snapshots via cron:
@@ -499,11 +448,11 @@ $ author-collector export --check-schema
 |------|-------|--------|
 | 10:05 | RSS connector discovers 10k URLs (bug: missing discovery limit) | Operator notices high fetch_log count |
 | 10:07 | Operator kills fetch process (Ctrl+C) | Run status = FAILED, run_id = abc123 |
-| 10:08 | Verify scope: `author-collector inspect-run --run-id abc123` | Shows 9k fetch_log entries, 5k potential articles |
+| 10:08 | Verify scope via SQL on `run_log`/`fetch_log` | Shows 9k fetch_log entries, 5k potential articles |
 | 10:10 | Review connector bug in git; confirm fix ready | Deploy fixed connector code |
-| 10:12 | Rollback run: `author-collector rollback --run abc123 --verbose` | Deletes all entries from run abc123; articles reverted |
-| 10:14 | Verify export valid: `author-collector export --check-schema` | All rows valid, count matches pre-abc123 |
-| 10:16 | Re-run with fixed connector: `author-collector sync --source-id rss:example` | Discovers 42 URLs (expected), completes cleanly |
+| 10:12 | Rollback run: `author-collector rollback --run abc123` | Deletes all entries from run abc123; articles reverted |
+| 10:14 | Verify export valid: `author-collector export --output verify.jsonl` | All rows valid, count matches pre-abc123 |
+| 10:16 | Re-run with fixed connector: `author-collector sync --source-id rss:example --seed tests/fixtures/rss/example.xml` | Discovers 42 URLs (expected), completes cleanly |
 
 **Recovery time**: ~15 minutes. **Data loss**: None (all retained in history, run_id enables selective undo).
 

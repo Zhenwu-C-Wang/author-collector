@@ -9,7 +9,7 @@
 ## Milestone 0: Core Data Model + Pipeline Contract (Required First)
 
 **Duration**: Define once, all downstream = fill-in-the-blanks.
-**Status**: `[ ] Not Started`
+**Status**: `[x] Completed (Contract Baseline Landed)`
 
 ### 0.1 - Core Pydantic Models & JSON Schemas
 - **Deliverables**:
@@ -20,7 +20,7 @@
   ```json
   {
     "id": "uuid",
-    "claim_path": "article.title",  // JSONPath to the claim
+    "claim_path": "/title",  // JSON Pointer (RFC 6901) to the claim
     "evidence_type": "meta_tag"|"json_ld"|"extracted"|"fetched_content",
     "source_url": "string",
     "extraction_method": "readability|trafilatura|meta|...",
@@ -38,10 +38,10 @@
     "title": "string",
     "author_hint": "string (unresolved)",
     "published_at": "ISO8601",
-    "snippet": "string (max 5000 chars, no full body)",
+    "snippet": "string (max 1500 chars, no full body)",
     "evidence": [
-      { "claim_path": "title", "evidence_type": "meta_tag", ... },
-      { "claim_path": "author_hint", "evidence_type": "extracted", ... }
+      { "claim_path": "/title", "evidence_type": "meta_tag", ... },
+      { "claim_path": "/author_hint", "evidence_type": "extracted", ... }
     ],
     "version": int,
     "created_at": "ISO8601",
@@ -50,7 +50,7 @@
   ```
 - **Run & Fetch Logs** (for traceability):
   - `RunLog`: `id, started_at, ended_at, source_id, status, error_message, run_id`
-  - `FetchLog`: `id, url, status_code, latency_ms, bytes_received, error_code, timestamp, run_id`
+  - `FetchLog`: `id, url, status_code, latency_ms, bytes_received, error_code, created_at, run_id`
 
 ### 0.2 - Minimum Pipeline Interface
 - **Contract**: `discover(seed) -> Iterator[URL]` → `fetch(URL) -> bytes` → `parse(bytes) -> Parsed` → `extract(Parsed) -> ArticleDraft + Evidence[]` → `store(ArticleDraft) -> Article` → `export() -> JSONL`
@@ -89,18 +89,18 @@
 - **Rationale**: All defensible in docs → no accidents from "someone changed concurrency to 100".
 
 ### Acceptance Criteria
-- [ ] All Pydantic models defined & validated
-- [ ] Both `.schema.json` files exist, are valid, and loadable in code
-- [ ] Contract tests run in CI, all pass
-- [ ] Empty connector (no URLs) produces valid JSONL export with zero rows
-- [ ] README documents the pipeline flow + "Why no body field" + "Why robots is mandatory"
+- [x] All Pydantic models defined & validated
+- [x] Both `.schema.json` files exist, are valid, and loadable in code
+- [x] Contract tests run in CI, all pass
+- [x] Empty connector (no URLs) produces valid JSONL export with zero rows
+- [x] README documents the pipeline flow + "Why no body field" + "Why robots is mandatory"
 
 ---
 
 ## Milestone 1: Fetcher Compliance Foundation
 
 **Goal**: Network layer is "safe, rate-limited, observable" — connector just produces URLs.
-**Status**: `[ ] Not Started`
+**Status**: `[x] Completed (Fetcher Foundation Landed)`
 
 **Delta from M0**: Fetch interface upgraded from `fetch(URL) -> bytes` to `fetch(URL) -> FetchedDoc` (includes status, headers, final_url, body for caching and 304 support).
 
@@ -173,7 +173,7 @@
   - Per-domain: track `last_fetch_time[domain]`, enforce `per_domain_delay_seconds`
   - Global: semaphore with `max_global_concurrency = 1` (no parallelism in v0)
   - Enqueue requests per domain, serialize globally
-  - Log: `fetch_log.timestamp`, `fetch_log.latency_ms`
+  - Log: `fetch_log.created_at`, `fetch_log.latency_ms`
 - **Integration**: HTTP fetcher uses this before each request.
 
 ### 1.3 - Fetch Security Constraints
@@ -202,7 +202,7 @@
     latency_ms INT,
     bytes_received INT,
     error_code TEXT,  -- NULL | TIMEOUT | SECURITY_BLOCKED | FETCH_ERROR | BLOCKED_BY_ROBOTS
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     run_id TEXT NOT NULL,
     FOREIGN KEY(run_id) REFERENCES run_log(id)
   );
@@ -210,18 +210,18 @@
 - **Logs**: Structured JSON to stdout (timestamp, url, status, latency, run_id, error_code).
 
 ### Acceptance Criteria
-- [ ] Integration tests: 200, 304, robots-disallow, timeout all log correctly
-- [ ] SSRF blocklist tests pass (localhost, 10.0.0.1, 127.0.0.1, 192.168.1.1)
-- [ ] Redirect limit enforced (5 → pass, 6 → blocked)
-- [ ] fetch_log table populated correctly during runs
-- [ ] Robots cache works (second call to same domain is instant)
+- [x] Integration tests: 200, 304, robots-disallow, timeout all log correctly
+- [x] SSRF blocklist tests pass (localhost, 10.0.0.1, 127.0.0.1, 192.168.1.1)
+- [x] Redirect limit enforced (5 → pass, 6 → blocked)
+- [x] fetch_log table populated correctly during runs
+- [x] Robots cache works (second call to same domain is instant)
 
 ---
 
 ## Milestone 2: Parser + Extractor
 
 **Goal**: Parse HTML → readable text (no full body storage); extract title/date/author hints + exact evidence links.
-**Status**: `[ ] Not Started`
+**Status**: `[x] Completed (Parser + Extractor Landed)`
 
 ### 2.1 - HTML → Readable Text
 - **File**: `parser/html.py`
@@ -231,7 +231,7 @@
   - Return `Parsed` object with: `text, title, date, author_hints, html_title, meta_tags`
   - **Do NOT save full text** — only extract fields needed for article + snippet
 - **Snippet generation**:
-  - First 5000 chars of readable text (or until first paragraph break past 2000 chars)
+  - First 1500 chars of readable text (v0 conservative cap)
   - Truncate mid-word → add "…"
 
 ### 2.2 - JSON-LD + Meta Tag Extraction
@@ -248,32 +248,32 @@
   - Input: `Parsed` (from parser)
   - Output: `ArticleDraft { title, author_hint, published_at, snippet, source_url }` + `Evidence[]`
   - **Evidence generation rule**:
-    - `title` from JSON-LD → evidence with `claim_path=article.title, evidence_type=json_ld`
-    - `title` fallback to meta og:title → evidence with `claim_path=article.title, evidence_type=meta_tag`
+    - `title` from JSON-LD → evidence with `claim_path=/title, evidence_type=json_ld`
+    - `title` fallback to meta og:title → evidence with `claim_path=/title, evidence_type=meta_tag`
     - etc. for author_hint, published_at
   - **Key constraint**: Every required field must have ≥1 evidence entry (or field is null + warning logged)
 - **Deterministic**: Same input HTML → same output (for regression tests).
 
 ### 2.4 - Snippet Truncation + Optional PII Scrubbing
 - **File**: `extractor/pii.py` (optional)
-- **Snippet truncation**: 5000 chars max (see 2.1)
+- **Snippet truncation**: 1500 chars max (see 2.1)
 - **PII scrubbing** (opt-in, default off for v0):
   - Regex patterns for email, phone, SSN placeholders (not removal, just masking in snippet)
   - Config: `enable_pii_scrub = False` (don't do it in v0, it's nice-to-have)
 
 ### Acceptance Criteria
-- [ ] Three fixture sets (normal/edge/malformed HTML) produce stable output
-- [ ] Evidence counts match claims (no orphaned evidence)
-- [ ] Snippet always ≤5000 chars
-- [ ] Same input HTML → same ArticleDraft + Evidence (deterministic)
-- [ ] Regression tests lock down key edge cases (missing title, malformed JSON-LD, etc.)
+- [x] Three fixture sets (normal/edge/malformed HTML) produce stable output
+- [x] Evidence counts match claims (no orphaned evidence)
+- [x] Snippet always ≤1500 chars
+- [x] Same input HTML → same ArticleDraft + Evidence (deterministic)
+- [x] Regression tests lock down key edge cases (missing title, malformed JSON-LD, etc.)
 
 ---
 
 ## Milestone 3: Storage + Dedup + Versioning + Export
 
 **Goal**: Idempotent upsert, exact dedup, minimal versioning, JSONL export.
-**Status**: `[ ] Not Started`
+**Status**: `[x] Completed (Storage + Export + Rollback Landed)`
 
 ### 3.1 - SQLite Schema + Migrations
 - **File**: `storage/migrations/0001_init.sql`
@@ -321,7 +321,7 @@
   ```
 
 ### 3.4 - Export: JSONL (Schema Validated)
-- **File**: `cli/export.py`
+- **File**: `author_collector/cli.py` (subcommand: `author-collector export`)
 - **Behavior**:
   - Query `articles` + `evidence` joins
   - Serialize as JSONL (one article per line)
@@ -334,18 +334,18 @@
   ```
 
 ### Acceptance Criteria
-- [ ] Multiple sync runs don't create duplicates (dedup test)
-- [ ] Content change produces new version record (versioning test)
-- [ ] Export validates all rows against schema (schema compliance test)
-- [ ] Migrations run cleanly from fresh DB → populated state
-- [ ] rollback --run <id> works (see Milestone 5 + ROLLBACK.md)
+- [x] Multiple sync runs don't create duplicates (dedup test)
+- [x] Content change produces new version record (versioning test)
+- [x] Export validates all rows against schema (schema compliance test)
+- [x] Migrations run cleanly from fresh DB → populated state
+- [x] rollback --run <id> works (see Milestone 5 + ROLLBACK.md)
 
 ---
 
 ## Milestone 4: Three Friendly Connectors
 
 **Goal**: RSS / HTML author page / arXiv all run end-to-end independently.
-**Status**: `[ ] Not Started`
+**Status**: `[x] Completed (RSS + HTML Author Page + arXiv Landed)`
 
 ### 4.1 - RSS Connector
 - **File**: `connectors/rss.py`
@@ -369,11 +369,11 @@
 ### 4.3 - arXiv Connector
 - **File**: `connectors/arxiv.py`
 - **Behavior**:
-  - Seed: Author ID or search query
-  - Use public arXiv API (Atom feed) → no scraping required
-  - Discover: Parse Atom → (PDF URL, title, published_date, authors)
-  - Fetch PDF? **No** — store URL + metadata from Atom, skip PDF fetch in v0 (too large)
-  - Create article from Atom metadata
+  - **Final v0 position**: arXiv works as a **URL discoverer** under the immutable pipeline (discover → fetch → parse → extract → store → export)
+  - Seed: Author ID or search query (`search_query`) OR direct Atom URL/file
+  - Discover: Parse Atom and emit non-PDF `abs` URLs (deduped)
+  - Fetch PDF? **No** — PDF links are filtered at discovery; only `abs` pages enter pipeline
+  - Note: “Atom metadata direct-store mode” is deferred to a future milestone to avoid stage-skipping in v0
 - **Fixtures**: `tests/fixtures/arxiv/response.atom` (mock arXiv Atom response)
 - **Integration test**: Query fixture → discover papers → store in DB.
 
@@ -386,18 +386,18 @@
 - **Failure isolation**: If RSS fails mid-sync, other connectors unaffected (no cascade).
 
 ### Acceptance Criteria
-- [ ] Each connector has working fixtures
-- [ ] Each connector runs sync end-to-end (discover → fetch → parse → extract → store → export)
-- [ ] Each produces valid JSONL export
-- [ ] Integration tests: all three connectors pass independently
-- [ ] One connector failure doesn't halt entire sync
+- [x] Each connector has working fixtures
+- [x] Each connector runs sync end-to-end (discover → fetch → parse → extract → store → export)
+- [x] Each produces valid JSONL export
+- [x] Integration tests: all three connectors pass independently
+- [x] One connector failure doesn't halt entire sync
 
 ---
 
 ## Milestone 5: Identity Resolution v0 (Manual Review, No Auto-Merge)
 
 **Goal**: "Human-in-the-loop" identity merging — candidates identified, human decides.
-**Status**: `[ ] Not Started`
+**Status**: `[x] Completed (Manual Review Loop Landed)`
 
 ### 5.1 - Candidate Scoring (Rule-Based, No Auto-Merge)
 - **File**: `resolution/scoring.py`
@@ -441,11 +441,11 @@
   - `evidence`: list of supporting facts (e.g., ["email match", "same domain"])
 
 ### 5.2 - Review Queue Output
-- **File**: `cli/review_queue.py`
+- **File**: `resolution/scoring.py`, `author_collector/cli.py` (`review-queue`)
 - **Behavior**:
   - Run: `author-collector review-queue`
   - Output: `review.json` with all candidates (score ≥ 0.6)
-  - **Human reviews** & edits (`accept`, `reject`, `split`)
+  - **Human reviews** & edits (`accept`, `reject`, `hold`)
   - Save edited file
 - **Output structure**:
   ```json
@@ -469,25 +469,26 @@
   - Read review.json
   - For each "accept": `merge_author(from_id, to_id)` → creates `merge_decisions` record
   - For each "reject": log, skip
+  - Replay-safe: same candidate ID is idempotent (no duplicate merge_decisions rows)
   - **Reversible**: All merges logged with evidence + can be undone (see ROLLBACK.md)
 
 ### Acceptance Criteria
-- [ ] Same-name candidates appear in review queue
-- [ ] No auto-merges (score < 1.0 never auto-applies)
-- [ ] Review queue editable, replayable
-- [ ] `review apply` creates merge_decisions records
-- [ ] Merges are undoable (rollback-friendly)
+- [x] Same-name candidates appear in review queue
+- [x] No auto-merges (score < 1.0 never auto-applies)
+- [x] Review queue editable, replayable
+- [x] `review apply` creates merge_decisions records
+- [x] Merges are undoable (rollback-friendly)
 
 ---
 
 ## Cross-Milestone Criteria (All Phases)
 
-- [ ] All code has docstrings (no excessive comments)
-- [ ] CI: contract tests, unit tests, integration tests all green
-- [ ] No panics/unhandled exceptions (graceful degradation)
-- [ ] Logs (stdout JSON) include `run_id` for traceability
-- [ ] README updated w/ compliance philosophy + "Why no body field" + "Why robots mandatory"
-- [ ] Migration path documented (if upgrading DB schema later)
+- [x] All code has docstrings (no excessive comments)
+- [x] CI: contract tests, unit tests, integration tests all green
+- [x] No panics/unhandled exceptions (graceful degradation)
+- [x] Logs (stdout JSON) include `run_id` for traceability
+- [x] README updated w/ compliance philosophy + "Why no body field" + "Why robots mandatory"
+- [x] Migration path documented (if upgrading DB schema later)
 
 ---
 

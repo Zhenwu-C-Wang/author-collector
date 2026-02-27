@@ -8,7 +8,7 @@ This project prioritizes **legal compliance, ethical sourcing, and operational s
 
 ### Non-Negotiables in v0
 
-1. **No Full Body Text Storage** — We extract snippets (≤5000 chars) only. Full article text is never stored.
+1. **No Full Body Text Storage** — We extract snippets (≤1500 chars in v0) only. Full article text is never stored.
 2. **Robots.txt Enforcement** — Mandatory and cannot be disabled. We respect `robots.txt` rules.
 3. **Serial Execution** — Single concurrent fetch only (`MAX_GLOBAL_CONCURRENCY=1`). No parallel crawling.
 4. **Rate Limiting** — Minimum 5-second gap between requests to same domain.
@@ -25,7 +25,7 @@ Seed Input
     ↓
 [Discover] → Iterator of URLs
     ↓
-[Fetch] → Bytes (robots.txt + rate limiting + SSRF checks)
+[Fetch] → FetchedDoc (status/headers/body + robots + rate limiting + SSRF checks)
     ↓
 [Parse] → Structured data (title, author hints, JSON-LD)
     ↓
@@ -49,20 +49,20 @@ cd author-collector
 pip install -e .
 ```
 
-### Run Default Connectors
+### Run Core Commands (M0-M4)
 
 ```bash
-# Sync from RSS feed
-author-collector sync --source-id rss:example --seed https://example.com/rss
+# Validate contract schemas
+author-collector validate-schemas
 
-# Export to JSONL
-author-collector export --output articles.jsonl
+# Export baseline JSONL (empty file in v0 contract baseline)
+author-collector export --output articles.jsonl --run-id run-export-demo
 
-# Review identity candidates
-author-collector review-queue --min-score 0.8 > candidates.json
-# Edit candidates.json to accept/reject merges
-author-collector review apply candidates.json
+# Run connector sync (rss/html/arxiv source IDs are supported)
+author-collector sync --source-id rss:example_feed --seed tests/fixtures/rss/example.xml --run-id run-demo
 ```
+
+All CLI commands emit structured JSON lines and include `run_id` for traceability.
 
 ## Documentation
 
@@ -70,7 +70,9 @@ author-collector review apply candidates.json
 - **[CHANGESET.md](CHANGESET.md)** — File-level changes per milestone
 - **[ROLLBACK.md](ROLLBACK.md)** — Incident recovery procedures, per-run undo
 - **[docs/compliance.md](docs/compliance.md)** — Why we make these design choices
-- **[docs/non-negotiables.md](docs/non-negotiables.md)** — Boundaries we don't cross
+- **[docs/non-negotiables.md](docs/non-negotiables.md)** — Hard boundaries in v0
+- **[docs/verification.md](docs/verification.md)** — Verification checklist and reproducible checks
+- **[docs/migrations.md](docs/migrations.md)** — Additive migration policy, startup upgrades, compatibility checks
 - **[storage/migrations/0001_init.sql](storage/migrations/0001_init.sql)** — Database schema (run_id tracking, versioning, merge audit trail)
 
 ## Testing
@@ -87,13 +89,14 @@ All tests must pass before commit (enforced by CI).
 
 ## Project Status
 
-**v0 (Current)**: Basic pipeline + 3 connectors + manual identity resolution.
+**v0 (Current)**: Milestones 0-5 complete (contract, fetcher, parser/extractor, storage/export/rollback, connectors, and manual review-loop identity resolution).  
+**Next**: Hardening and ops polish (docstrings/CI/migration-path documentation).
 
-See [ROADMAP.md](ROADMAP.md) for detailed timeline and milestones.
+See [ROADMAP.md](ROADMAP.md) for detailed milestone status.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines (not yet written).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
 ## License
 

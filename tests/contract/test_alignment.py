@@ -5,11 +5,12 @@ These tests ensure that the database constraints and model definitions are
 consistent across layers (models, schema, config, pipeline).
 """
 
+import json
 import sqlite3
 from pathlib import Path
 import pytest
 
-from core.models import FetchedDoc, Article, Evidence, EvidenceType, RunLog, FetchLog
+from core.models import FetchedDoc
 from core.config import ComplianceConfig
 
 
@@ -73,7 +74,7 @@ class TestDBSchemaAlignment:
 
             assert "run_id" in table_def, \
                 f"{table} must have run_id column for rollback tracking"
-            assert f"FOREIGN KEY(run_id) REFERENCES run_log" in table_def, \
+            assert "FOREIGN KEY(run_id) REFERENCES run_log" in table_def, \
                 f"{table} must have FK to run_log via run_id"
 
     def test_indexes_on_run_id(self, migration_sql):
@@ -89,6 +90,44 @@ class TestDBSchemaAlignment:
         for idx in indexes:
             assert idx in migration_sql, \
                 f"Index {idx} must exist for efficient run-based queries"
+
+    def test_run_summary_duration_seconds_calculated(self, migration_sql, tmp_path):
+        """run_summary.duration_seconds should be calculated from started_at/ended_at."""
+        db_path = tmp_path / "alignment_duration.db"
+        conn = sqlite3.connect(db_path)
+        conn.executescript(migration_sql)
+        conn.execute(
+            """
+            INSERT INTO run_log (id, source_id, started_at, ended_at, status)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("run-001", "rss:test", "2025-02-27T10:00:00", "2025-02-27T10:01:30", "COMPLETED"),
+        )
+        duration_seconds = conn.execute(
+            "SELECT duration_seconds FROM run_summary WHERE id = ?",
+            ("run-001",),
+        ).fetchone()[0]
+        conn.close()
+        assert duration_seconds == 90, "Expected a 90-second duration in run_summary"
+
+    def test_articles_with_evidence_empty_array_when_no_evidence(self, migration_sql, tmp_path):
+        """articles_with_evidence should expose [] when an article has no evidence rows."""
+        db_path = tmp_path / "alignment_evidence.db"
+        conn = sqlite3.connect(db_path)
+        conn.executescript(migration_sql)
+        conn.execute(
+            """
+            INSERT INTO articles (id, canonical_url, source_id, title, version)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("art-001", "https://example.com/a", "rss:test", "Title", 1),
+        )
+        evidence_json = conn.execute(
+            "SELECT evidence FROM articles_with_evidence WHERE id = ?",
+            ("art-001",),
+        ).fetchone()[0]
+        conn.close()
+        assert json.loads(evidence_json) == [], "Expected empty evidence array when no rows exist"
 
 
 class TestFetchedDocContract:

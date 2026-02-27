@@ -14,6 +14,7 @@
     },
     "claim_path": {
       "type": "string",
+      "pattern": "^(/([^/~]|(~[01]))*)+$",
       "description": "JSON Pointer (RFC 6901) to the claim in the article (e.g., '/title', '/author_hint', '/published_at')"
     },
     "evidence_type": {

@@ -8,12 +8,17 @@ Design principles:
 - Deterministic serialization (for hashing, deduping, versioning)
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def utc_now() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(UTC)
 
 
 # ============================================================================
@@ -89,11 +94,11 @@ class Evidence(BaseModel):
     input_ref: Optional[str] = None  # e.g., CSS selector / JSON-LD path / meta name (for replay)
     snippet_max_chars_applied: Optional[int] = None  # Truncation policy at extraction time
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
     run_id: str  # Which run added this evidence?
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "examples": [
                 {
                     "id": "uuid",
@@ -108,10 +113,11 @@ class Evidence(BaseModel):
                     "extractor_version": "jsonld@1.0",
                     "input_ref": "og:title",
                     "created_at": "2025-02-27T10:00:00",
-                    "run_id": "run_123"
+                    "run_id": "run_123",
                 }
             ]
         }
+    )
 
 
 # ============================================================================
@@ -149,8 +155,8 @@ class Article(BaseModel):
     version: int = 1
 
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
     @field_validator("snippet")
     @classmethod
@@ -160,8 +166,8 @@ class Article(BaseModel):
             return v[:1500] + "…"
         return v
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "examples": [
                 {
                     "id": "uuid",
@@ -182,15 +188,16 @@ class Article(BaseModel):
                             "confidence": 0.95,
                             "retrieved_at": "2025-02-27T10:00:00",
                             "created_at": "2025-02-27T10:00:00",
-                            "run_id": "run_123"
+                            "run_id": "run_123",
                         }
                     ],
                     "version": 1,
                     "created_at": "2025-02-27T10:00:00",
-                    "updated_at": "2025-02-27T10:00:00"
+                    "updated_at": "2025-02-27T10:00:00",
                 }
             ]
         }
+    )
 
 
 # ============================================================================
@@ -218,6 +225,7 @@ class ArticleDraft(BaseModel):
     @field_validator("snippet")
     @classmethod
     def validate_snippet_length(cls, v: Optional[str]) -> Optional[str]:
+        """Clamp snippets to v0 max length."""
         if v and len(v) > 1500:
             return v[:1500] + "…"
         return v
@@ -274,7 +282,7 @@ class FetchedDoc(BaseModel):
     body_bytes: Optional[bytes]  # Raw content, or None for 304 Not Modified
     body_sha256: Optional[str]  # SHA256 of body (for exact dedup)
     latency_ms: int  # Response time
-    retrieved_at: datetime = Field(default_factory=datetime.utcnow)
+    retrieved_at: datetime = Field(default_factory=utc_now)
 
 
 # ============================================================================
@@ -294,7 +302,7 @@ class FetchLog(BaseModel):
 
     error_code: Optional[FetchErrorCode] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
     run_id: str
 
 
@@ -305,7 +313,7 @@ class RunLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     source_id: str  # e.g., "rss:techblog"
 
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utc_now)
     ended_at: Optional[datetime] = None
 
     status: RunStatus = RunStatus.RUNNING
@@ -338,7 +346,7 @@ class Account(BaseModel):
 
     author_id: Optional[str] = None  # FK to Author (resolved)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class Author(BaseModel):
@@ -350,8 +358,8 @@ class Author(BaseModel):
     canonical_name: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class MergeDecision(BaseModel):
@@ -371,7 +379,7 @@ class MergeDecision(BaseModel):
     evidence_ids: List[str] = Field(default_factory=list)
     decision_criteria: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
     created_by: Optional[str] = None
     run_id: str
 

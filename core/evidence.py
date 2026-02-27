@@ -7,9 +7,14 @@ Ensures deterministic evidence creation and content verification.
 import hashlib
 import json
 from uuid import uuid4
-from datetime import datetime
+from datetime import UTC, datetime
 
 from core.models import Evidence, EvidenceType, Article
+
+
+def utc_now() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(UTC)
 
 
 def hash_evidence(evidence: Evidence) -> str:
@@ -56,7 +61,7 @@ def hash_article_content(article: Article) -> str:
         "published_at": article.published_at.isoformat() if article.published_at else None,
     }
     payload = json.dumps(data, sort_keys=True, default=str)
-    return hashlib.sha256(payload.hexdigest()).hexdigest()
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def create_evidence(
@@ -99,8 +104,8 @@ def create_evidence(
         extraction_method=extraction_method,
         confidence=confidence,
         metadata=metadata or {},
-        retrieved_at=retrieved_at or datetime.utcnow(),
-        created_at=datetime.utcnow(),
+        retrieved_at=retrieved_at or utc_now(),
+        created_at=utc_now(),
         run_id=run_id,
     )
 

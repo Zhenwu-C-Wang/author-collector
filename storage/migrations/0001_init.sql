@@ -105,6 +105,11 @@ CREATE TABLE versions (
   -- content_hash: SHA256 of {title, author_hint, snippet, published_at}
   -- helps detect actual changes vs. metadata-only updates
   content_hash TEXT NOT NULL,
+  title_snapshot TEXT,
+  author_hint_snapshot TEXT,
+  published_at_snapshot TEXT,
+  snippet_snapshot TEXT,
+  evidence_snapshot TEXT,      -- JSON array snapshot of latest evidence for this version
 
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   run_id TEXT NOT NULL,  -- which run triggered this version bump?
@@ -301,13 +306,16 @@ SELECT
   a.version,
   a.created_at,
   a.updated_at,
-  json_group_array(
-    json_object(
-      'claim_path', e.claim_path,
-      'evidence_type', e.evidence_type,
-      'extracted_text', e.extracted_text
+  CASE
+    WHEN COUNT(e.id) = 0 THEN json('[]')
+    ELSE json_group_array(
+      json_object(
+        'claim_path', e.claim_path,
+        'evidence_type', e.evidence_type,
+        'extracted_text', e.extracted_text
+      )
     )
-  ) AS evidence
+  END AS evidence
 FROM articles a
 LEFT JOIN evidence e ON a.id = e.article_id
 GROUP BY a.id;
@@ -321,7 +329,10 @@ SELECT
   rl.status,
   rl.started_at,
   rl.ended_at,
-  datetime(rl.ended_at, 'subday') - datetime(rl.started_at, 'subday') AS duration_seconds,
+  CASE
+    WHEN rl.ended_at IS NULL THEN NULL
+    ELSE CAST(ROUND((julianday(rl.ended_at) - julianday(rl.started_at)) * 86400) AS INTEGER)
+  END AS duration_seconds,
   COUNT(DISTINCT fl.url) AS fetch_count,
   COUNT(DISTINCT CASE WHEN fl.error_code IS NULL THEN fl.url END) AS fetch_success_count,
   COUNT(DISTINCT fl.error_code) AS fetch_error_types,
