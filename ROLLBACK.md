@@ -208,40 +208,193 @@ $ author-collector rollback --run <affected_run> --verbose
 
 ---
 
-## Rollback Data Model
+## Rollback Data Model (Explicit Saga Pattern)
 
-All rollback operations are based on `run_id` propagation. Here's how data flows:
+All rollback operations are based on `run_id` propagation using a **saga pattern** for distributed mutation tracking. This ensures that multi-step operations can be partially reverted without leaving orphaned data.
 
-```
-FetchLog row:
-  id, url, status_code, run_id ← identifies which run produced this fetch
+### Saga Pattern: Run Lifecycle
 
-Evidence row:
-  id, article_id, claim_path, run_id ← identifies which run added this evidence
-
-Version row:
-  id, article_id, version, content_hash, run_id ← identifies which run triggered version bump
-
-MergeDecision row:
-  id, from_author_id, to_author_id, evidence_ids, run_id ← identifies review session
-
-Article row:
-  id, canonical_url, version ← no run_id (immutable key), but version track who updated
-```
-
-**Rollback strategy**:
+A `run_id` is a transaction coordinator for all artifacts created/modified during one sync execution:
 
 ```
-rollback --run <run_id>:
-  1. Find all FetchLog rows with run_id → DELETE (cleanup logs)
-  2. Find all Evidence rows with run_id → DELETE (remove evidential claims)
-  3. Find all Version rows with run_id → DELETE (remove version bumps)
-  4. For each Article touched by roll-back run:
-     a. If created in this run → DELETE article
-     b. If updated in this run → REVERT to previous version
-  5. Run sanity checks (schema validation on remaining data)
-  6. Log rollback event: "Rolled back run {run_id}: {count} deletions, {count} reverts"
+┌─────────────────────────────────────────────────────────────────────┐
+│ Saga: SyncRun(run_id)                                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│ BEGIN run_id=abc123                                                │
+│                                                                     │
+│ ┌─ Stage 1: Discovery ───────────────────────────────────────┐    │
+│ │ produce_urls(seed) → iterator[URL]                         │    │
+│ │ (No DB writes yet; pure computation)                       │    │
+│ └────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│ ┌─ Stage 2: Fetch ───────────────────────────────────────────┐    │
+│ │ FOR each URL:                                              │    │
+│ │   fetch(URL) → FetchedDoc                                 │    │
+│ │   INSERT fetch_log { run_id=abc123, url, status, ... }   │    │ ← Compensate: DELETE
+│ │ (Idempotent: same URL re-fetched overwrites fetch_log)    │    │
+│ └────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│ ┌─ Stage 3: Parse+Extract ───────────────────────────────────┐    │
+│ │ FOR each FetchedDoc:                                       │    │
+│ │   parse(doc) → Parsed                                      │    │
+│ │   extract(parsed) → ArticleDraft + Evidence[]             │    │
+│ │ (No DB writes yet; pure computation)                       │    │
+│ └────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│ ┌─ Stage 4: Store (Upsert) ──────────────────────────────────┐    │
+│ │ FOR each ArticleDraft D:                                   │    │
+│ │   UPSERT articles { canonical_url, source_id } → Article A │    │ ← Compensate: DELETE or REVERT
+│ │   versioning: hash(A.title, A.author_hint, ...)          │    │
+│ │   IF hash ≠ prev_hash:                                    │    │
+│ │     INSERT versions { article_id=A.id, version, etc. }    │    │ ← Compensate: DELETE
+│ │     UPDATE articles { version++ }                          │    │ ← Compensate: version--
+│ │   FOR each Evidence E in D.evidence:                       │    │
+│ │     INSERT evidence { run_id=abc123, ... }                │    │ ← Compensate: DELETE
+│ │ (Idempotent: same (url, source) upserted is merged)       │    │
+│ └────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│ COMMIT run_id=abc123 ✓ OR ROLLBACK ✗                             │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+### Compensating Transactions (Rollback Steps)
+
+When `rollback --run abc123` is invoked, the following compensation sequence executes **in reverse order**:
+
+```
+Compensation Sequence (stages 4 → 1):
+  1. Find all Evidence rows { run_id=abc123 } → DELETE (undo evidence claims)
+  2. Find all Version rows { run_id=abc123 } → DELETE (undo version bumps)
+  3. For each Article touched by abc123:
+       a. IF created in abc123 (no prior versions) → DELETE article
+       b. IF updated in abc123 (prior versions exist) → REVERT to latest pre-abc123 version
+       c. Update article.version to pre-abc123 value
+  4. Find all FetchLog rows { run_id=abc123 } → DELETE (cleanup logs)
+  5. Verify sanity: export --check-schema (ensure no orphaned references)
+```
+
+### Examples
+
+**Example 1: Simple Rollback (New Articles Created)**
+
+```
+Initial state:
+  - articles: [article_1 (v1), article_2 (v1)]
+  - versions: [(article_1, v1), (article_2, v1)]
+
+Run abc123 executes:
+  - INSERT articles { canonical_url=url3, source_id=rss:feed } → article_3 (v1)
+  - INSERT evidence { article_id=article_3, run_id=abc123 } [2 rows]
+  - INSERT versions { article_id=article_3, version=1, run_id=abc123 }
+  - INSERT fetch_log { url=url3, run_id=abc123 }
+
+After abc123:
+  - articles: [article_1 (v1), article_2 (v1), article_3 (v1)]
+
+Compensation (rollback --run abc123):
+  1. DELETE evidence { run_id=abc123 } → 2 rows removed
+  2. DELETE versions { run_id=abc123 } → 1 row removed
+  3. Article article_3 has no prior versions → DELETE article_3
+  4. DELETE fetch_log { run_id=abc123 } → 1 row removed
+
+Final state:
+  - articles: [article_1 (v1), article_2 (v1)]
+  - versions: [(article_1, v1), (article_2, v1)]
+  - Evidence: []
+  - FetchLog: []
+  ✓ Clean rollback: abc123 artifacts completely removed
+```
+
+**Example 2: Complex Rollback (Updated Article + New Evidence)**
+
+```
+Initial state:
+  - articles: [article_1 (v1, title="Old")]
+  - versions: [(article_1, v1)]
+  - evidence: [(article_1, claim_path=/title, evidence_type=meta_tag)]
+
+Run abc123 executes:
+  - FETCH url1 → update article_1 title="Updated"
+  - UPSERT articles { canonical_url=url1 } → article_1 (v2)
+  - INSERT versions { article_id=article_1, version=2, run_id=abc123, hash=new_hash }
+  - INSERT evidence { article_id=article_1, claim_path=/title, run_id=abc123 } [new evidence]
+  - INSERT fetch_log { url=url1, run_id=abc123 }
+
+After abc123:
+  - articles: [article_1 (v2, title="Updated")]
+  - versions: [(article_1, v1, hash=old_hash), (article_1, v2, hash=new_hash, run_id=abc123)]
+  - evidence: [(old from v1), (new from abc123)]
+
+Compensation (rollback --run abc123):
+  1. DELETE evidence { run_id=abc123 } → new evidence rows removed
+  2. DELETE versions { run_id=abc123 } → v2 removed
+  3. Article article_1 has prior version → REVERT to v1:
+       - Query versions { article_id=article_1 } max(version) → v1
+       - Read v1 content hash → query articles for matching content
+       - UPDATE articles { article_id=article_1, version=1, title="Old" }
+  4. DELETE fetch_log { run_id=abc123 } → 1 row removed
+
+Final state:
+  - articles: [article_1 (v1, title="Old")]
+  - versions: [(article_1, v1)]
+  - evidence: [(article_1, claim_path=/title, evidence_type=meta_tag)] ← from v1, untouched
+  ✓ Clean rollback: article_1 content and version restored to pre-abc123 state
+```
+
+**Example 3: Merge Rollback (Identity Resolution)**
+
+```
+Initial state:
+  - authors: [author_A (canonical_name="Jane Doe"), author_B (canonical_name="Jane D")]
+  - merge_decisions: [merge_1 { from=author_B, to=author_A, run_id=review_run_123 }]
+  - articles: [art1 (author_id=author_A), art2 (author_id=author_B → author_A after merge)]
+
+Compensation (rollback --merge merge_1):
+  1. Find merge_decisions { id=merge_1 } → read from_author_id, to_author_id
+  2. Find all articles { author_id=author_A } created/updated in review_run_123 → reverse author_id to author_B
+  3. UPDATE articles { author_id=author_B } WHERE originally from author_B
+  4. UPDATE merge_decisions { status='reverted', reverted_at=now() } (mark, not delete, for audit trail)
+
+Final state:
+  - authors: [author_A, author_B] ← both restored
+  - articles: [art1 (author_id=author_A), art2 (author_id=author_B)] ← unmerged
+  - merge_decisions: [merge_1 { status='reverted' }] ← audit trail preserved
+  ✓ Clean unmerge: identity relationships restored, merge history preserved
+```
+
+### Run ID Assignment and Lifecycle
+
+```
+Timeline of a run_id:
+
+1. Created: run_id = UUID.uuid4() generated at sync start
+   - Stored in RunLog { id=run_id, source_id, status='IN_PROGRESS', started_at=now() }
+
+2. Active: During sync, all writes include run_id
+   - fetch_log.run_id = run_id
+   - evidence.run_id = run_id
+   - versions.run_id = run_id
+
+3. Complete: sync finishes (success or failure)
+   - RunLog { id=run_id, status='COMPLETED' or 'FAILED', ended_at=now() }
+
+4. Retention: run_id stays in DB indefinitely
+   - Enables historical queries: "what changed in run abc123?"
+   - Enables rollback: "undo all changes from run abc123"
+
+5. Rollback: (optional) operator invokes `rollback --run abc123`
+   - Compensation sequence executes
+   - All rows { run_id=abc123 } either deleted or compensated
+   - RunLog status may be marked 'ROLLED_BACK' (informational)
+```
+
+This saga pattern ensures:
+- **Atomicity at run level**: All or nothing per sync
+- **Auditability**: Every mutation tagged with run_id + timestamp
+- **Reversibility**: Any run can be undone cleanly without cascade damage
+- **Determinism**: Compensation steps are always idempotent (safe to re-run)
 
 ---
 

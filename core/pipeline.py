@@ -19,6 +19,7 @@ from core.models import (
     ArticleDraft,
     Evidence,
     Article,
+    FetchedDoc,
     FetchLog,
     RunLog,
 )
@@ -68,7 +69,7 @@ class FetchStage(ABC):
     """
 
     @abstractmethod
-    def fetch(self, url: str, run_id: str) -> tuple[Optional[bytes], FetchLog]:
+    def fetch(self, url: str, run_id: str) -> tuple[Optional[FetchedDoc], FetchLog]:
         """
         Fetch a single URL.
 
@@ -77,9 +78,10 @@ class FetchStage(ABC):
             run_id: Run ID for tracking
 
         Returns:
-            (bytes content, FetchLog entry)
-            - If fetch fails, content is None and FetchLog.error_code is set
-            - If fetch succeeds, content is bytes (may be empty)
+            (FetchedDoc, FetchLog entry)
+            - If fetch fails, FetchedDoc is None and FetchLog.error_code is set
+            - If fetch succeeds, FetchedDoc contains status_code, headers, body_bytes, etc.
+            - 304 Not Modified: FetchedDoc.body_bytes is None (use cached version)
 
         Always returns a FetchLog (never raises; errors logged)
         """
@@ -97,13 +99,12 @@ class ParseStage(ABC):
     """
 
     @abstractmethod
-    def parse(self, content: bytes, url: str, run_id: str) -> Parsed:
+    def parse(self, fetched: FetchedDoc, run_id: str) -> Parsed:
         """
         Parse downloaded content.
 
         Args:
-            content: Raw bytes (HTML, JSON, etc.)
-            url: Original URL (for error context)
+            fetched: FetchedDoc from fetch stage
             run_id: Run ID for tracking
 
         Returns:
@@ -286,15 +287,15 @@ class Pipeline:
             for url in urls:
                 try:
                     # Fetch
-                    content, fetch_log = self.fetch.fetch(url, run_id)
+                    fetched_doc, fetch_log = self.fetch.fetch(url, run_id)
                     run_log.fetched_count += 1
 
-                    if fetch_log.error_code:
+                    if fetch_log.error_code or fetched_doc is None:
                         run_log.error_count += 1
                         continue  # Skip to next URL
 
                     # Parse
-                    parsed = self.parse.parse(content, url, run_id)
+                    parsed = self.parse.parse(fetched_doc, run_id)
 
                     # Extract
                     draft, evidence_list = self.extract.extract(parsed, run_id)

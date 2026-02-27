@@ -170,16 +170,17 @@ class Article(BaseModel):
                     "title": "Breaking: AI Achieves AGI",
                     "author_hint": "Jane Doe",
                     "published_at": "2025-02-27T10:00:00",
-                    "snippet": "In a stunning turn of events... (5000 chars max)",
+                    "snippet": "In a stunning turn of events... (max 1500 chars, no full body)",
                     "evidence": [
                         {
                             "id": "uuid",
                             "article_id": "uuid",
-                            "claim_path": "title",
+                            "claim_path": "/title",
                             "evidence_type": "meta_tag",
                             "source_url": "https://example.com/article",
                             "extracted_text": "Breaking: AI Achieves AGI",
                             "confidence": 0.95,
+                            "retrieved_at": "2025-02-27T10:00:00",
                             "created_at": "2025-02-27T10:00:00",
                             "run_id": "run_123"
                         }
@@ -249,6 +250,31 @@ class Parsed(BaseModel):
 
     # Raw HTML (kept for fallback, but not stored in final article)
     original_html: Optional[str] = None
+
+
+# ============================================================================
+# Fetch Result
+# ============================================================================
+
+class FetchedDoc(BaseModel):
+    """
+    Result of a successful HTTP fetch.
+
+    Contains the raw response data needed for parsing:
+    - status_code, headers (for caching via ETag/Last-Modified)
+    - final_url (after redirects)
+    - body (raw bytes) or None for 304
+    - metadata (latency, size)
+
+    This replaces the simple "fetch -> bytes" contract.
+    """
+    status_code: int  # 200, 304, 404, etc.
+    final_url: str  # URL after all redirects
+    headers: Dict[str, str]  # Response headers (lowercase keys)
+    body_bytes: Optional[bytes]  # Raw content, or None for 304 Not Modified
+    body_sha256: Optional[str]  # SHA256 of body (for exact dedup)
+    latency_ms: int  # Response time
+    retrieved_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # ============================================================================

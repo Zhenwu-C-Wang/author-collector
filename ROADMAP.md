@@ -73,12 +73,18 @@
   max_global_concurrency = 1  # v0: no parallelism
   per_domain_delay_seconds = 5  # min gap between requests
   robots_check = REQUIRED  # not optional
-  snippet_max_chars = 5000  # never full text
-  max_body_bytes = 10_000_000  # 10MB cutoff for memory safety
+  snippet_max_chars = 1500  # v0 conservative, never full text
+  evidence_snippet_max_chars = 800  # shorter for evidence
+  max_body_bytes_by_type = {  # content-type aware
+    "text/html": 5_000_000,  # 5MB
+    "application/json": 2_000_000,  # 2MB
+    "application/pdf": 0,  # PDFs not fetched
+    ...
+  }
   fetch_timeout_seconds = 30
   max_redirects = 5
   blocked_protocols = ["file", "gopher", ...]  # only http(s)
-  blocked_ip_ranges = ["127.0.0.1/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]  # SSRF prevention
+  blocked_ip_ranges = ["127.0.0.1/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fe80::/10", "fc00::/7", ...]  # SSRF + IPv6
   ```
 - **Rationale**: All defensible in docs → no accidents from "someone changed concurrency to 100".
 
@@ -96,17 +102,70 @@
 **Goal**: Network layer is "safe, rate-limited, observable" — connector just produces URLs.
 **Status**: `[ ] Not Started`
 
+**Delta from M0**: Fetch interface upgraded from `fetch(URL) -> bytes` to `fetch(URL) -> FetchedDoc` (includes status, headers, final_url, body for caching and 304 support).
+
 ### 1.1 - Robots.txt Parser + Cache
 - **File**: `fetcher/robots.py`
 - **Behavior**:
   - Parse robots.txt at domain discovery time
   - Cache result (in-memory dict or SQLite, configurable)
-  - Disallow any fetch if robots says no → log as `fetch_status = BLOCKED_BY_ROBOTS`
+  - **Disallow decision**: If robots.txt explicitly disallows URL → block fetch, log as `error_code = BLOCKED_BY_ROBOTS`
   - **Cannot be disabled** in v0 config (no `--ignore-robots` flag)
-- **Edge cases**:
-  - No robots.txt → allow
-  - robots.txt fetch fails → conservative: block, log warning
-  - Redirect chain to robots.txt → follow up to `max_redirects`, then block
+- **Failure handling strategy** (important distinction):
+  - No robots.txt → **allow** (site opted out of robots protocol)
+  - robots.txt fetch **404** or **timeout** → **allow** + **log warning** (conservative but practical; avoids false negatives)
+  - robots.txt fetch **5xx** → **allow** + **decrease rate** (temporary service error; be extra polite)
+  - Redirect chain to robots.txt → follow up to `max_redirects`, then treat as timeout (allow + log)
+  - **Rationale**: v0 assumes good faith. Site temporarily down shouldn't block discovery; slower rate is safer.
+- **Detailed Failure Handling Flowchart**:
+  ```
+  For each domain D discovered:
+    1. Check cache[D] → if hit, return cached result (instant)
+    2. Resolve D → get IPv4/IPv6 addresses
+       - If private IP (127.0.0.1/8, 10.0.0.0/8, etc.) → SSRF block (never try robots)
+    3. Fetch robots.txt@D:
+       HEAD /robots.txt (30s timeout, follow up to 5 redirects, same-protocol preferred)
+
+    ON SUCCESS (200):
+      - Parse robots.txt with `urllib.robotparser`
+      - For user-agent "author-collector" or "*", extract Disallow rules
+      - Cache result (TTL: 1 hour, or configurable per domain)
+      - For each URL in discovery, check: robotparser.can_fetch(user_agent, url) → true = allow, false = block
+
+    ON 404 (robots.txt missing):
+      - Assume site doesn't use robots protocol → ALLOW
+      - Log warning: "robots.txt not found for {domain}; assuming robots protocol not enforced"
+      - Cache as "allow_all" (TTL: 4 hours, less aggressive than 200 case)
+      - Continue fetching domain URLs
+
+    ON 5xx (server error):
+      - Site temporarily unavailable → ALLOW (but stay conservative)
+      - Log warning: "robots.txt returned {status_code} for {domain}; allowing with reduced rate"
+      - Cache as "allow_with_caution" (TTL: 15 min, short TTL for recovery)
+      - Increase per_domain_delay_seconds by 2x for this domain (temporary politeness boost)
+      - Continue fetching domain URLs
+
+    ON TIMEOUT (>30s with no response):
+      - Network issue or overloaded server → ALLOW
+      - Log warning: "robots.txt request timeout for {domain}; assuming protocol not enforced"
+      - Cache as "allow_all" (TTL: 1 hour)
+      - Continue fetching domain URLs
+
+    ON REDIRECT LOOP (>5 hops):
+      - Treat as timeout (robots.txt unreachable) → ALLOW
+      - Log warning: "robots.txt redirect loop for {domain}"
+      - Cache as "allow_all" (TTL: 1 hour)
+  ```
+- **Rate Decrease Algorithm**:
+  - Normal rate: `per_domain_delay_seconds = 5`
+  - On robots.txt 5xx: multiply by 2x → `10 seconds`
+  - On robots.txt disallow: `5 seconds` (standard, just respect rule)
+  - Reset to normal when: domain recovers, next hourly refresh cache check
+- **Cache Eviction**:
+  - Successful parse: 1 hour TTL
+  - 404 (no robots): 4 hours TTL (less frequent re-check)
+  - 5xx or timeout: 15 min TTL (quick recovery window)
+  - Manual flush: `config.robot_cache_flush_hours` (default: none, infinite until app restart)
 
 ### 1.2 - Per-Domain Rate Limiting + Global Concurrency
 - **File**: `fetcher/politeness.py`
@@ -342,12 +401,44 @@
 
 ### 5.1 - Candidate Scoring (Rule-Based, No Auto-Merge)
 - **File**: `resolution/scoring.py`
-- **Rules** (example):
-  - Same name + same published domain → score 0.8
-  - Similar name (Levenshtein < 0.1 edit distance) + same domain → score 0.6
-  - Same account URL from different sources → score 1.0
-  - **Never automatically merge** (score < 1.0)
-- **Output**: `Candidate { from_author, to_author, score, evidence }`
+- **Scoring Rules** (cumulative, max 1.0):
+
+  **Rule 1: Exact Account Match**
+  - Same email/social URL from different sources → +1.0 (highest confidence, one-time auto-allow in review, but NO auto-merge)
+  - Evidence: explicit account matching (e.g., Twitter @user appears in multiple articles)
+
+  **Rule 2: Same Domain + Profile Link**
+  - Same canonical domain + explicit profile/biography page link → +0.9
+  - Evidence: both authors found on same domain (e.g., blog.example.com/author/jane and blog.example.com/people/jane)
+
+  **Rule 3: Exact Name Match + Same Domain**
+  - Name(A) == Name(B) AND domain(A) == domain(B) → +0.8
+  - Evidence: canonical_url domain must be identical (e.g., both published on `techblog.com`)
+
+  **Rule 4: Similar Name (Normalized Levenshtein) + Same Domain**
+  - normalized_distance(Name(A), Name(B)) ≤ 0.15 AND same domain → +0.6
+  - **Normalized Levenshtein formula**: `distance = levenshtein_edit_distance(a, b) / max(len(a), len(b))`
+  - Example: "Jane Doe" vs "Jane Do" → distance = 1/8 = 0.125 < 0.15 ✓
+  - Example: "Jane Doe" vs "John Smith" → distance = 7/9 = 0.78 > 0.15 ✗
+  - Evidence: name similarity + same publishing domain
+
+  **Rule 5: Same Domain Only (Weak Signal)**
+  - Same published domain, different names (no similarity) → +0.3
+  - Low confidence, informational only
+  - Evidence: both articles from same site, names differ
+
+  **Review Queue Thresholds** (v0 conservative):
+  - Score ≥ 0.75: HIGH confidence → appears in review queue, flagged for quick approval
+  - Score 0.5-0.74: MEDIUM confidence → appears in review queue, requires careful review
+  - Score < 0.5: NOT SHOWN in review queue (too speculative)
+
+  **Key Constraint**: Score 1.0 does NOT auto-merge in v0. All merges require explicit human `accept` in review queue.
+  - Rationale: Even "1.0" matches could be accidental duplicates (different people with same email, etc.)
+  - v0 design: human is the ultimate arbiter; system suggests, human decides
+
+- **Output**: `Candidate { from_author, to_author, score, scoring_breakdown, evidence }`
+  - `scoring_breakdown`: dict of rule name → contribution (for transparency in review UI)
+  - `evidence`: list of supporting facts (e.g., ["email match", "same domain"])
 
 ### 5.2 - Review Queue Output
 - **File**: `cli/review_queue.py`

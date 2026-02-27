@@ -9,6 +9,7 @@ from core.models import (
     Author,
     Account,
     MergeDecision,
+    FetchedDoc,
     FetchLog,
     RunLog,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "Author",
     "Account",
     "MergeDecision",
+    "FetchedDoc",
     "FetchLog",
     "RunLog",
     "ComplianceConfig",

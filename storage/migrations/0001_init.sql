@@ -4,8 +4,14 @@
 -- 1. run_id: Every mutation is tagged with run_id for per-run rollback
 -- 2. Versioning: Content changes tracked in versions table
 -- 3. Evidence: Every claim (title, author, etc.) has traceability to source
--- 4. Dedup: (canonical_url, source_id) is unique key
+-- 4. Dedup: (canonical_url, source_id) is UNIQUE constraint (dedup key)
 -- 5. Merge audit: All author merges logged with evidence + rollbackable
+--
+-- KEY DESIGN DECISION: Article Primary Key
+-- - TABLE KEY: id (UUID, global unique identifier)
+-- - DEDUP KEY: (canonical_url, source_id) UNIQUE constraint
+-- - RATIONALE: Different sources may discover same article (same URL) independently.
+--   Need both global id (for references) and source-scoped dedup (for upsert logic).
 --
 -- Migration history: 0001_init.sql (this file)
 -- No backward-incompatible changes allowed. Only append columns/tables.
@@ -22,7 +28,7 @@ CREATE TABLE articles (
   title TEXT,
   author_hint TEXT,             -- unresolved author name (may have multiple articles per author_hint)
   published_at TEXT,            -- ISO8601 or NULL if unknown
-  snippet TEXT,                 -- max 5000 chars, no full body
+  snippet TEXT,                 -- max 1500 chars, no full body (v0 conservative)
 
   version INT DEFAULT 1,        -- bumped when content changes
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -48,7 +54,9 @@ CREATE TABLE evidence (
   id TEXT PRIMARY KEY,
   article_id TEXT NOT NULL,
 
-  -- claim_path: JSONPath to the claim in article (e.g., "title", "author_hint", "published_at")
+  -- claim_path: JSON Pointer (RFC 6901) to the claim in article
+  -- Examples: "/title", "/author_hint", "/published_at"
+  -- Must be one of the valid pointers; enforced by application layer
   claim_path TEXT NOT NULL,
 
   -- evidence_type: where this evidence came from
@@ -59,12 +67,18 @@ CREATE TABLE evidence (
   evidence_type TEXT NOT NULL CHECK(evidence_type IN ('meta_tag', 'json_ld', 'extracted', 'fetched_content')),
 
   source_url TEXT NOT NULL,     -- where this evidence came from (article URL)
-  extraction_method TEXT,       -- e.g., "trafilatura", "readability", "meta_og:title"
+  extraction_method TEXT,       -- e.g., "trafilatura", "meta_og:title", "json_ld_headline"
 
-  extracted_text TEXT,          -- the actual evidence snippet
+  extracted_text TEXT NOT NULL,          -- the evidence content (snippet, max 800 chars)
   confidence REAL DEFAULT 1.0,  -- 0.0-1.0 confidence (not critical in v0, but structure it)
 
   metadata TEXT,                -- JSON: any extra context (e.g., {"selector": "og:author", "tag": "meta"})
+
+  -- Replay/audit fields for reproducibility
+  retrieved_at TEXT NOT NULL,  -- when was this evidence collected?
+  extractor_version TEXT,      -- e.g., "trafilatura@1.9.0", "jsonld@1.0"
+  input_ref TEXT,              -- e.g., CSS selector, JSON-LD path, meta name
+  snippet_max_chars_applied INTEGER,  -- truncation limit at extraction time
 
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   run_id TEXT NOT NULL,         -- key for rollback: which run added this evidence?
