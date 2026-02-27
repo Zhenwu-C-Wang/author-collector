@@ -73,6 +73,10 @@ All CLI commands emit structured JSON lines and include `run_id` for traceabilit
 - **[docs/non-negotiables.md](docs/non-negotiables.md)** — Hard boundaries in v0
 - **[docs/verification.md](docs/verification.md)** — Verification checklist and reproducible checks
 - **[docs/migrations.md](docs/migrations.md)** — Additive migration policy, startup upgrades, compatibility checks
+- **[docs/releases/v0.1.0.md](docs/releases/v0.1.0.md)** — Release notes
+- **[docs/canary.md](docs/canary.md)** — Real-data canary workflow
+- **[docs/alerts.md](docs/alerts.md)** — Minimal operational alert rules
+- **[docs/repo-guardrails.md](docs/repo-guardrails.md)** — CI/coverage/branch-protection guardrails
 - **[storage/migrations/0001_init.sql](storage/migrations/0001_init.sql)** — Database schema (run_id tracking, versioning, merge audit trail)
 
 ## Testing
@@ -89,8 +93,8 @@ All tests must pass before commit (enforced by CI).
 
 ## Project Status
 
-**v0 (Current)**: Milestones 0-5 complete (contract, fetcher, parser/extractor, storage/export/rollback, connectors, and manual review-loop identity resolution).  
-**Next**: Hardening and ops polish (docstrings/CI/migration-path documentation).
+**v0.1.0 (Release)**: Milestones 0-5 complete and release-gated (contract, fetcher, parser/extractor, storage/export/rollback, connectors, manual review-loop identity resolution, CI + coverage gate, structured logs, migration-path docs).  
+**Current focus (M6 mainline)**: scheduler + operability hardening (daily canary, alerting, run governance).
 
 See [ROADMAP.md](ROADMAP.md) for detailed milestone status.
 

@@ -1,0 +1,12 @@
+[
+  {
+    "name": "go_blog",
+    "source_id": "rss:go_blog",
+    "seed": "https://go.dev/blog/feed.atom"
+  },
+  {
+    "name": "arxiv_cs_ai",
+    "source_id": "arxiv:cs_ai",
+    "seed": "https://export.arxiv.org/api/query?search_query=cat:cs.AI&start=0&max_results=3"
+  }
+]

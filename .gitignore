@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Runtime artifacts
+artifacts/
+export_*.jsonl
+review_*.json
+canary_report_*.json

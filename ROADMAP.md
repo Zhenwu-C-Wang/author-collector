@@ -2,7 +2,8 @@
 
 **Goal**: Build a compliant, evidence-first aggregation pipeline that can run long-term without legal/technical risk, with identity resolution as manual review queue (not automatic merge).
 
-**Phases**: 5 milestones, each with clear acceptance criteria and contractual boundaries.
+**Release Status**: `v0.1.0` ready for release and canary operation.
+**Phases**: 6 milestones (M0-M5 delivered, M6 planned), each with clear acceptance criteria and contractual boundaries.
 
 ---
 
@@ -481,6 +482,55 @@
 
 ---
 
+## Milestone 6: Scheduler + Operability (Productization Mainline)
+
+**Mainline Decision**: Choose **“调度/可运维能力提升”** as M6 primary direction.
+**Goal**: Turn v0.1.0 into an always-on, observable, rollback-safe service baseline.
+**Status**: `[~] Planned (Post-v0.1.0)`
+
+### 6.1 - Daily Real-Data Canary
+- **Artifacts**:
+  - `.github/workflows/canary.yml` (daily schedule + manual trigger)
+  - `canary/sources.json` (1-3 real public sources)
+  - `scripts/run_canary.py` (sync → export → review-queue + rollback check + report)
+- **Checks**:
+  - error rate (`errors/fetched`)
+  - rollback functional check result
+  - structured log traceability (`run_id` completeness)
+
+### 6.2 - Minimal Alert Rules
+- **Signals**:
+  - `cli_error`
+  - `pipeline_*_error`
+  - `BLOCKED_BY_ROBOTS`
+- **Policy**:
+  - critical: fail canary workflow
+  - warning: keep workflow green but emit warning
+- **Doc**: `docs/alerts.md`
+
+### 6.3 - Repo Guardrails
+- **Branch protection target**:
+  - required checks: `lint`, `test`
+  - coverage floor: `>=80%`
+  - minimum one approval + stale dismissal + conversation resolution
+- **Doc/Automation**:
+  - `docs/repo-guardrails.md`
+  - `scripts/apply_branch_protection.py`
+
+### 6.4 - Run Governance Baseline
+- keep last N canary artifacts and reports
+- require one-click rollback command in on-call runbook
+- define operational SLO draft for sync success and error budget
+
+### Acceptance Criteria
+- [ ] Canary runs daily and uploads report artifacts
+- [ ] Alert rules produce actionable signal (no silent critical failures)
+- [ ] Branch protection enabled on `main` with required CI checks
+- [ ] Coverage gate remains ≥80% in CI
+- [ ] On-call runbook includes rollback and canary triage steps
+
+---
+
 ## Cross-Milestone Criteria (All Phases)
 
 - [x] All code has docstrings (no excessive comments)
@@ -523,7 +573,7 @@ No time estimates provided. Focus on per-milestone acceptance criteria. Prioriti
 
 ## Next Steps
 
-1. Review this roadmap with stakeholders
-2. Confirm milestone priorities (OK to skip Milestone 4 or 5 if needed)
-3. Generate detailed SQL schema (see `sqlite_schema.sql`)
-4. Begin Milestone 0 implementation (models + contract tests)
+1. Cut `v0.1.0` tag and publish release notes
+2. Run scheduled canary for 1 week and tune alert thresholds
+3. Enable branch protection using required checks (`lint`, `test`)
+4. Execute M6 backlog items in priority order
