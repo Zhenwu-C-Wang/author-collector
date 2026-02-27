@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Evidence",
+  "description": "A piece of evidence backing a claim in an article",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier (UUID)"
+    },
+    "article_id": {
+      "type": "string",
+      "description": "ID of the article this evidence backs"
+    },
+    "claim_path": {
+      "type": "string",
+      "description": "JSONPath to the claim in the article (e.g., 'title', 'author_hint', 'published_at')"
+    },
+    "evidence_type": {
+      "type": "string",
+      "enum": ["meta_tag", "json_ld", "extracted", "fetched_content"],
+      "description": "Where this evidence came from"
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL where this evidence was found"
+    },
+    "extraction_method": {
+      "type": ["string", "null"],
+      "description": "Method used to extract this evidence (e.g., 'trafilatura', 'meta_og:title')"
+    },
+    "extracted_text": {
+      "type": "string",
+      "description": "The actual evidence content (snippet of text)"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Confidence score (0.0-1.0)"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Extra context (JSON object, arbitrary keys/values)"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this evidence was recorded"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "ID of the run that added this evidence (for rollback)"
+    }
+  },
+  "required": [
+    "id",
+    "article_id",
+    "claim_path",
+    "evidence_type",
+    "source_url",
+    "extracted_text",
+    "created_at",
+    "run_id"
+  ],
+  "additionalProperties": false
+}

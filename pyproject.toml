@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "author-collector"
+version = "0.1.0"
+description = "A compliant, evidence-first pipeline for aggregating public author content across platforms with identity resolution and structured extraction."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "Zhenwu-C-Wang", email = "contact@example.com"}
+]
+
+dependencies = [
+  "pydantic>=2.0",
+  "jsonschema>=4.0",
+  "requests>=2.28",
+  "cachetools>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+  "black>=23.0",
+  "ruff>=0.1",
+  "mypy>=1.0",
+]
+parser = [
+  "trafilatura>=1.7",  # HTML → readable text
+  "feedparser>=6.0",    # RSS parsing
+]
+
+[project.scripts]
+author-collector = "cli.main:cli"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-v --tb=short --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "contract: contract schema validation tests",
+  "integration: end-to-end tests",
+  "unit: unit tests",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]  # line too long (handled by black)
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false  # relax for v0

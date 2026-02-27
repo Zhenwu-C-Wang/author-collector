@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Article",
+  "description": "A published article/content piece discovered from a source. Final export format.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier (UUID)"
+    },
+    "canonical_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Canonical URL (normalized: lowercase, no fragment, no utm params)"
+    },
+    "source_id": {
+      "type": "string",
+      "description": "Source identifier (e.g., 'rss:techblog', 'html:author_page', 'arxiv:cs')"
+    },
+    "title": {
+      "type": ["string", "null"],
+      "description": "Article title"
+    },
+    "author_hint": {
+      "type": ["string", "null"],
+      "description": "Unresolved author name(s) from the source (may be wrong, awaiting identity resolution)"
+    },
+    "published_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Publication date/time (ISO8601)"
+    },
+    "snippet": {
+      "type": ["string", "null"],
+      "maxLength": 5000,
+      "description": "Short excerpt (max 5000 chars, no full body text)"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "article_id": {"type": "string"},
+          "claim_path": {"type": "string"},
+          "evidence_type": {"type": "string", "enum": ["meta_tag", "json_ld", "extracted", "fetched_content"]},
+          "source_url": {"type": "string", "format": "uri"},
+          "extraction_method": {"type": ["string", "null"]},
+          "extracted_text": {"type": "string"},
+          "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+          "metadata": {"type": "object"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "run_id": {"type": "string"}
+        },
+        "required": ["id", "article_id", "claim_path", "evidence_type", "source_url", "extracted_text", "created_at", "run_id"]
+      },
+      "description": "Evidence backing the claims in this article"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version number (increments when content changes)"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this article was first discovered"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this article was last updated"
+    }
+  },
+  "required": [
+    "id",
+    "canonical_url",
+    "source_id",
+    "evidence",
+    "version",
+    "created_at",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "constraints": {
+    "no_body_field": "Full article body is never stored or exported (compliance boundary)",
+    "no_pii_in_snippet": "Personal identifying information should not be in snippet (use optional scrubbing)",
+    "evidence_required": "Every non-null claim (title, author_hint, etc.) should have at least one evidence entry"
+  }
+}
