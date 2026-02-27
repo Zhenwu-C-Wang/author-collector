@@ -69,20 +69,22 @@ def create_evidence(
     extraction_method: str | None = None,
     confidence: float = 1.0,
     metadata: dict | None = None,
+    retrieved_at: datetime | None = None,
 ) -> Evidence:
     """
     Factory for creating Evidence objects with defaults.
 
     Args:
         article_id: ID of the article this backs
-        claim_path: JSONPath to claim (e.g., "title")
+        claim_path: JSON Pointer to claim (RFC 6901, e.g., "/title", "/author_hint")
         evidence_type: Where this came from
         source_url: URL where found
-        extracted_text: The actual evidence
+        extracted_text: Short snippet (max 800 chars)
         run_id: Which run added this
-        extraction_method: Optional (e.g., "trafilatura")
+        extraction_method: Optional (e.g., "trafilatura", "meta_og:title")
         confidence: Optional (default 1.0)
         metadata: Optional extra data
+        retrieved_at: Optional (defaults to now)
 
     Returns:
         Evidence object (with generated id, created_at, etc.)
@@ -97,6 +99,7 @@ def create_evidence(
         extraction_method=extraction_method,
         confidence=confidence,
         metadata=metadata or {},
+        retrieved_at=retrieved_at or datetime.utcnow(),
         created_at=datetime.utcnow(),
         run_id=run_id,
     )
@@ -108,7 +111,7 @@ def validate_evidence(article: Article) -> tuple[bool, list[str]]:
 
     Rules:
     - Every non-null field should have ≥1 evidence entry
-    - Evidence claim_path must exist in article
+    - Evidence claim_path (JSON Pointer) must correspond to article field
     - Evidence source_url must be valid
 
     Args:
@@ -119,7 +122,14 @@ def validate_evidence(article: Article) -> tuple[bool, list[str]]:
     """
     errors = []
 
-    # Check that non-null fields have evidence
+    # Mapping: field names → expected JSON Pointer claim_path
+    # (e.g., "title" field → "/title" claim_path)
+    field_to_pointer = {
+        "title": "/title",
+        "author_hint": "/author_hint",
+        "published_at": "/published_at",
+    }
+
     field_claims = {
         "title": article.title,
         "author_hint": article.author_hint,
@@ -128,15 +138,16 @@ def validate_evidence(article: Article) -> tuple[bool, list[str]]:
 
     for field_name, field_value in field_claims.items():
         if field_value is not None:
+            expected_pointer = field_to_pointer[field_name]
             # Check if this field has evidence
             has_evidence = any(
-                e.claim_path == field_name for e in article.evidence
+                e.claim_path == expected_pointer for e in article.evidence
             )
             if not has_evidence:
                 errors.append(f"Field '{field_name}' has no evidence")
 
-    # Check that evidence claim_paths match article fields
-    valid_claim_paths = {"title", "author_hint", "published_at"}
+    # Check that evidence claim_paths use valid JSON Pointers
+    valid_claim_paths = {"/title", "/author_hint", "/published_at"}
     for evidence in article.evidence:
         if evidence.claim_path not in valid_claim_paths:
             errors.append(

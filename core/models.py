@@ -54,26 +54,40 @@ class Evidence(BaseModel):
     """
     A piece of evidence backing a claim.
 
+    Design:
+    - claim_path: JSON Pointer (RFC 6901) to the field in Article (e.g., "/title", "/author_hint")
+    - extracted_text: Short snippet (≤800 chars) backing the claim
+    - Includes replay/audit fields (retrieved_at, extractor_version, input_ref) for reproducibility
+
     Example:
-      claim_path = "article.title"
+      claim_path = "/title"  # JSON Pointer
       evidence_type = "meta_tag"
       source_url = "https://example.com/article"
-      extracted_text = "Breaking: AI Achieves AGI"
+      extracted_text = "Breaking: AI Achieves AGI"  # Snippet (≤800 chars)
       confidence = 0.95
+      extractor_version = "jsonld@1.0"
     """
     id: str = Field(default_factory=lambda: str(uuid4()))
     article_id: str  # FK to Article
 
-    claim_path: str  # JSONPath to the claim (e.g., "title", "author_hint", "published_at")
+    # JSON Pointer (RFC 6901) to the claim (e.g., "/title", "/author_hint", "/published_at")
+    claim_path: str
+
     evidence_type: EvidenceType
 
     source_url: str  # Where this evidence came from
-    extraction_method: Optional[str] = None  # e.g., "trafilatura", "meta_og:title"
+    extraction_method: Optional[str] = None  # e.g., "trafilatura", "meta_og:title", "json_ld_headline"
 
-    extracted_text: str  # The actual evidence content
+    extracted_text: str  # Short snippet backing the claim (max 800 chars recommended)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
     metadata: Dict[str, Any] = Field(default_factory=dict)  # Extra context
+
+    # Replay/audit fields: allow future reproducibility of extraction
+    retrieved_at: datetime  # When was this evidence collected?
+    extractor_version: Optional[str] = None  # e.g., "trafilatura@1.9.0", "jsonld@1.0"
+    input_ref: Optional[str] = None  # e.g., CSS selector / JSON-LD path / meta name (for replay)
+    snippet_max_chars_applied: Optional[int] = None  # Truncation policy at extraction time
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     run_id: str  # Which run added this evidence?
@@ -84,12 +98,15 @@ class Evidence(BaseModel):
                 {
                     "id": "uuid",
                     "article_id": "uuid",
-                    "claim_path": "title",
+                    "claim_path": "/title",
                     "evidence_type": "meta_tag",
                     "source_url": "https://example.com",
                     "extraction_method": "meta_og:title",
                     "extracted_text": "Example Article",
                     "confidence": 0.95,
+                    "retrieved_at": "2025-02-27T10:00:00",
+                    "extractor_version": "jsonld@1.0",
+                    "input_ref": "og:title",
                     "created_at": "2025-02-27T10:00:00",
                     "run_id": "run_123"
                 }
@@ -138,9 +155,9 @@ class Article(BaseModel):
     @field_validator("snippet")
     @classmethod
     def validate_snippet_length(cls, v: Optional[str]) -> Optional[str]:
-        """Ensure snippet doesn't exceed 5000 chars."""
-        if v and len(v) > 5000:
-            return v[:5000] + "…"
+        """Ensure snippet doesn't exceed 1500 chars (conservative for v0)."""
+        if v and len(v) > 1500:
+            return v[:1500] + "…"
         return v
 
     class Config:
@@ -200,13 +217,9 @@ class ArticleDraft(BaseModel):
     @field_validator("snippet")
     @classmethod
     def validate_snippet_length(cls, v: Optional[str]) -> Optional[str]:
-        if v and len(v) > 5000:
-            return v[:5000] + "…"
+        if v and len(v) > 1500:
+            return v[:1500] + "…"
         return v
-
-
-# ============================================================================
-# Parsing Intermediate (HTML → Parsed)
 # ============================================================================
 
 class Parsed(BaseModel):

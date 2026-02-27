@@ -44,19 +44,23 @@ class ComplianceConfig:
 
     # IP blocklist: private/internal IPs cannot be fetched (SSRF prevention)
     BLOCKED_IP_RANGES: list[str] = [
+        # IPv4 private
         "127.0.0.1/8",          # Loopback
         "10.0.0.0/8",           # Private
         "172.16.0.0/12",        # Private
         "192.168.0.0/16",       # Private
         "169.254.0.0/16",       # Link-local
+        "169.254.169.254/32",   # AWS metadata endpoint
         "224.0.0.0/4",          # Multicast
         "255.255.255.255/32",   # Broadcast
         "0.0.0.0/8",            # This network
-        "::1/128",              # IPv6 loopback
-        "fe80::/10",            # IPv6 link-local
-        "fc00::/7",             # IPv6 private
+        # IPv6 private/link-local
+        "::1/128",              # Loopback
+        "fe80::/10",            # Link-local
+        "fc00::/7",             # Unique local addresses (ULA)
+        "ff00::/8",             # Multicast
     ]
-    """IP ranges that cannot be fetched (SSRF prevention)."""
+    """IP ranges that cannot be fetched (SSRF prevention). Updated for IPv6."""
 
     # Maximum number of redirects per fetch
     MAX_REDIRECTS: int = 5
@@ -66,9 +70,23 @@ class ComplianceConfig:
     FETCH_TIMEOUT_SECONDS: int = 30
     """Maximum time to wait for a single fetch (seconds)."""
 
-    # Maximum body size (memory safety)
-    MAX_BODY_BYTES: int = 10_000_000  # 10 MB
-    """Maximum bytes to download per fetch."""
+    # Maximum body size (memory safety, depends on content-type)
+    # v0: Conservative defaults per content-type to prevent memory bloat
+    MAX_BODY_BYTES_BY_TYPE: dict[str, int] = {
+        "text/html": 5_000_000,          # 5 MB for HTML pages
+        "application/xml": 5_000_000,    # 5 MB for XML (feeds, sitemaps)
+        "text/xml": 5_000_000,
+        "application/atom+xml": 5_000_000,  # Atom feeds
+        "application/rss+xml": 5_000_000,   # RSS feeds
+        "application/json": 2_000_000,   # 2 MB for JSON
+        "text/plain": 2_000_000,         # 2 MB for plain text
+        "application/pdf": 0,             # PDFs not fetched
+        "application/x-pdf": 0,
+    }
+    """Max body bytes per content-type. Unlisted types default to MAX_BODY_BYTES_DEFAULT."""
+
+    MAX_BODY_BYTES_DEFAULT: int = 500_000  # 500 KB default for unknown types
+    """Fallback max body size for unknown content-types (conservative)."""
 
     # User-Agent (must be descriptive + link to docs)
     USER_AGENT: str = "author-collector/0.1 (+https://github.com/anthropics/author-collector)"
@@ -79,8 +97,12 @@ class ComplianceConfig:
     # ========================================================================
 
     # Snippet maximum length (no full text storage)
-    SNIPPET_MAX_CHARS: int = 5000
-    """Maximum snippet length (no full article body)."""
+    SNIPPET_MAX_CHARS: int = 1500
+    """Maximum snippet length (v0: conservative 1500 chars, no full article body)."""
+
+    # Evidence snippet maximum length (even shorter)
+    EVIDENCE_SNIPPET_MAX_CHARS: int = 800
+    """Maximum chars for evidence.extracted_text (shorter than article snippet)."""
 
     # Don't store full body text (compliance boundary)
     STORE_FULL_BODY: bool = False
@@ -163,8 +185,16 @@ class ComplianceConfig:
         ), "SNIPPET_MAX_CHARS must be > 0"
 
         assert (
-            cls.MAX_BODY_BYTES > 0
-        ), "MAX_BODY_BYTES must be > 0"
+            cls.EVIDENCE_SNIPPET_MAX_CHARS > 0
+        ), "EVIDENCE_SNIPPET_MAX_CHARS must be > 0"
+
+        assert (
+            cls.MAX_BODY_BYTES_DEFAULT > 0
+        ), "MAX_BODY_BYTES_DEFAULT must be > 0"
+
+        assert (
+            all(b >= 0 for b in cls.MAX_BODY_BYTES_BY_TYPE.values())
+        ), "All MAX_BODY_BYTES_BY_TYPE values must be ≥ 0"
 
 
 # Validate at module import time

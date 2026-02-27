@@ -26,22 +26,7 @@ ARTICLE_SCHEMA = json.loads((SCHEMAS_DIR / "article.schema.json").read_text())
 EVIDENCE_SCHEMA = json.loads((SCHEMAS_DIR / "evidence.schema.json").read_text())
 
 
-@pytest.fixture
-def sample_evidence() -> Evidence:
-    """Sample valid evidence."""
-    return Evidence(
-        id="ev-001",
-        article_id="art-001",
-        claim_path="title",
-        evidence_type=EvidenceType.META_TAG,
-        source_url="https://example.com/article",
-        extraction_method="meta_og:title",
-        extracted_text="Example Article Title",
-        confidence=0.95,
-        metadata={},
-        created_at=datetime.utcnow(),
-        run_id="run-001",
-    )
+# Note: sample_evidence and other fixtures are imported from conftest.py
 
 
 @pytest.fixture
@@ -109,10 +94,11 @@ class TestEvidenceSchema:
             data = {
                 "id": "ev-001",
                 "article_id": "art-001",
-                "claim_path": "title",
+                "claim_path": "/title",  # JSON Pointer
                 "evidence_type": ev_type,
                 "source_url": "https://example.com",
                 "extracted_text": "Text",
+                "retrieved_at": "2025-02-27T10:00:00",
                 "created_at": "2025-02-27T10:00:00",
                 "run_id": "run-001",
             }
@@ -125,10 +111,11 @@ class TestEvidenceSchema:
         invalid_data = {
             "id": "ev-001",
             "article_id": "art-001",
-            "claim_path": "title",
+            "claim_path": "/title",
             "evidence_type": "invalid_type",  # NOT in enum
             "source_url": "https://example.com",
             "extracted_text": "Text",
+            "retrieved_at": "2025-02-27T10:00:00",
             "created_at": "2025-02-27T10:00:00",
             "run_id": "run-001",
         }
@@ -141,11 +128,12 @@ class TestEvidenceSchema:
         valid_data = {
             "id": "ev-001",
             "article_id": "art-001",
-            "claim_path": "title",
+            "claim_path": "/title",
             "evidence_type": "meta_tag",
             "source_url": "https://example.com",
             "extracted_text": "Text",
             "confidence": 0.5,
+            "retrieved_at": "2025-02-27T10:00:00",
             "created_at": "2025-02-27T10:00:00",
             "run_id": "run-001",
         }
@@ -202,7 +190,7 @@ class TestArticleSchema:
             jsonschema.validate(data_with_body, ARTICLE_SCHEMA)
 
     def test_article_snippet_max_length(self):
-        """Snippet must not exceed 5000 chars."""
+        """Snippet must not exceed 1500 chars (v0 conservative)."""
         invalid_article = {
             "id": "art-001",
             "canonical_url": "https://example.com",
@@ -211,14 +199,14 @@ class TestArticleSchema:
             "version": 1,
             "created_at": "2025-02-27T10:00:00",
             "updated_at": "2025-02-27T10:00:00",
-            "snippet": "x" * 5001,  # EXCEEDS LIMIT
+            "snippet": "x" * 1501,  # EXCEEDS LIMIT
         }
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(invalid_article, ARTICLE_SCHEMA)
 
-        # Exactly 5000 is OK
+        # Exactly 1500 is OK
         valid_article = invalid_article.copy()
-        valid_article["snippet"] = "x" * 5000
+        valid_article["snippet"] = "x" * 1500
         jsonschema.validate(valid_article, ARTICLE_SCHEMA)
 
     def test_article_version_bounds(self):
@@ -300,10 +288,11 @@ class TestEvidenceValidation:
                 Evidence(
                     id="ev-001",
                     article_id="art-001",
-                    claim_path="invalid_field",  # NOT A VALID FIELD
+                    claim_path="/invalid_field",  # NOT A VALID FIELD (invalid JSON Pointer)
                     evidence_type=EvidenceType.META_TAG,
                     source_url="https://example.com",
                     extracted_text="Text",
+                    retrieved_at=datetime.utcnow(),
                     created_at=datetime.utcnow(),
                     run_id="run-001",
                 )

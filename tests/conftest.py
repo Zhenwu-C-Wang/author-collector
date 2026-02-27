@@ -28,13 +28,17 @@ def sample_evidence() -> Evidence:
     return Evidence(
         id=str(uuid4()),
         article_id="article-001",
-        claim_path="title",
+        claim_path="/title",  # JSON Pointer (RFC 6901)
         evidence_type=EvidenceType.META_TAG,
         source_url="https://example.com/article",
         extraction_method="meta_og:title",
         extracted_text="Example Article: Breaking News",
         confidence=0.95,
         metadata={"tag": "og:title"},
+        retrieved_at=datetime.utcnow(),
+        extractor_version="jsonld@1.0",
+        input_ref="og:title",
+        snippet_max_chars_applied=800,
         created_at=datetime.utcnow(),
         run_id="run-001",
     )
@@ -46,12 +50,13 @@ def sample_evidence_author() -> Evidence:
     return Evidence(
         id=str(uuid4()),
         article_id="article-001",
-        claim_path="author_hint",
+        claim_path="/author_hint",  # JSON Pointer
         evidence_type=EvidenceType.EXTRACTED,
         source_url="https://example.com/article",
         extraction_method="trafilatura",
         extracted_text="Jane Doe",
         confidence=0.8,
+        retrieved_at=datetime.utcnow(),
         created_at=datetime.utcnow(),
         run_id="run-001",
     )

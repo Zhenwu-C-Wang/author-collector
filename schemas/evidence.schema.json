@@ -14,7 +14,7 @@
     },
     "claim_path": {
       "type": "string",
-      "description": "JSONPath to the claim in the article (e.g., 'title', 'author_hint', 'published_at')"
+      "description": "JSON Pointer (RFC 6901) to the claim in the article (e.g., '/title', '/author_hint', '/published_at')"
     },
     "evidence_type": {
       "type": "string",
@@ -32,7 +32,8 @@
     },
     "extracted_text": {
       "type": "string",
-      "description": "The actual evidence content (snippet of text)"
+      "maxLength": 800,
+      "description": "The actual evidence content (short snippet, max 800 chars)"
     },
     "confidence": {
       "type": "number",
@@ -44,10 +45,27 @@
       "type": "object",
       "description": "Extra context (JSON object, arbitrary keys/values)"
     },
+    "retrieved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this evidence was collected"
+    },
+    "extractor_version": {
+      "type": ["string", "null"],
+      "description": "Version of extractor tool (e.g., 'trafilatura@1.9.0', 'jsonld@1.0')"
+    },
+    "input_ref": {
+      "type": ["string", "null"],
+      "description": "Reference to extraction input location (CSS selector, header name, JSON-LD path, etc.)"
+    },
+    "snippet_max_chars_applied": {
+      "type": ["integer", "null"],
+      "description": "Truncation limit applied at extraction time"
+    },
     "created_at": {
       "type": "string",
       "format": "date-time",
-      "description": "When this evidence was recorded"
+      "description": "When this evidence was recorded in system"
     },
     "run_id": {
       "type": "string",
@@ -61,6 +79,7 @@
     "evidence_type",
     "source_url",
     "extracted_text",
+    "retrieved_at",
     "created_at",
     "run_id"
   ],

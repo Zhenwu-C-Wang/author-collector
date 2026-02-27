@@ -32,8 +32,8 @@
     },
     "snippet": {
       "type": ["string", "null"],
-      "maxLength": 5000,
-      "description": "Short excerpt (max 5000 chars, no full body text)"
+      "maxLength": 1500,
+      "description": "Short excerpt (max 1500 chars, no full body text - v0 conservative)"
     },
     "evidence": {
       "type": "array",
@@ -42,17 +42,21 @@
         "properties": {
           "id": {"type": "string"},
           "article_id": {"type": "string"},
-          "claim_path": {"type": "string"},
+          "claim_path": {"type": "string", "description": "JSON Pointer to claim (RFC 6901, e.g. '/title', '/author_hint')"},
           "evidence_type": {"type": "string", "enum": ["meta_tag", "json_ld", "extracted", "fetched_content"]},
           "source_url": {"type": "string", "format": "uri"},
           "extraction_method": {"type": ["string", "null"]},
-          "extracted_text": {"type": "string"},
+          "extracted_text": {"type": "string", "maxLength": 800, "description": "Short snippet (max 800 chars)"},
           "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
           "metadata": {"type": "object"},
+          "retrieved_at": {"type": "string", "format": "date-time", "description": "When evidence was collected"},
+          "extractor_version": {"type": ["string", "null"], "description": "Version of extractor (e.g., 'trafilatura@1.9.0')"},
+          "input_ref": {"type": ["string", "null"], "description": "Reference to extraction input (selector, path, etc.)"},
+          "snippet_max_chars_applied": {"type": ["integer", "null"], "description": "Truncation limit at extraction time"},
           "created_at": {"type": "string", "format": "date-time"},
           "run_id": {"type": "string"}
         },
-        "required": ["id", "article_id", "claim_path", "evidence_type", "source_url", "extracted_text", "created_at", "run_id"]
+        "required": ["id", "article_id", "claim_path", "evidence_type", "source_url", "extracted_text", "retrieved_at", "created_at", "run_id"]
       },
       "description": "Evidence backing the claims in this article"
     },
